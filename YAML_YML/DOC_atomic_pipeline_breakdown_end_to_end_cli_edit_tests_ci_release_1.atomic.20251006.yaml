@@ -1,0 +1,20 @@
+workflow:
+  ns: DOC
+  wf: atomic_pipeline_breakdown_end_to_end_cli_edit_tests_ci_release_1
+  wfv: v1
+  title: "Atomic Pipeline Breakdown – End‑to‑End (CLI Edit → Tests → CI → Release)"
+  purpose: >
+    Documents an end‑to‑end atomic pipeline covering command‑line editing through unit testing, continuous
+    integration and final release.  It outlines the tools and applications involved (Python, PowerShell,
+    Git, Node.js, Docker), recommended VS Code extensions, quality stacks for Python and PowerShell,
+    and DevOps utilities.  The philosophy is to make every step an independently testable atom.
+  atoms:
+    - atom_uid: 01DOC013ABCDEFGHIJKLMNOPQR
+      atom_key: DOC/atomic_pipeline_breakdown_end_to_end_cli_edit_tests_ci_release_1/v1/doc/all/001
+      title: "End‑to‑end pipeline documentation"
+      description: >
+        Contains the full breakdown of the end‑to‑end pipeline.  It describes the stack of tools,
+        development environment setups, linting and testing frameworks, and best practices for
+        producing reliable, reproducible releases.  This documentation can be used to derive discrete
+        atomic tasks for each phase of the pipeline.
+      source_file: "ATOMIZED_PROCESSES/atomic_pipeline_breakdown_end_to_end_cli_edit_→_tests_→_ci_→_release (1).md"

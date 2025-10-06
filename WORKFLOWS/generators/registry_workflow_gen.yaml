@@ -1,0 +1,417 @@
+# Registry-Driven Workflow Generator
+# Auto-generate workflows from slash command registry intent tags
+
+meta:
+  workflow_id: "registry-workflow-gen-v1"
+  version: "1.0.0"
+  purpose: "Generate atomic workflows from slash_registry intent tags and command patterns"
+  author: "Atomic Workflow System"
+  created: "2025-10-06"
+
+inputs:
+  - name: registry_path
+    kind: file
+    mime: application/json
+    description: "Path to slash_registry_optimized.v2.json"
+    required: true
+
+  - name: intent_tags
+    kind: table
+    description: "Intent tags to generate workflows for"
+    required: false
+
+  - name: output_dir
+    kind: file
+    description: "Output directory for generated workflows"
+    default: ".workflows/generated/"
+
+outputs:
+  - name: generated_workflows
+    kind: table
+    description: "List of generated workflow files"
+
+  - name: generation_report
+    kind: json
+    description: "Report of workflow generation statistics"
+
+atoms:
+  - atom_uid: "01JADW9T0000000000000000L1"
+    atom_key: "workflows/generator/v1/load/all/001"
+    title: "Load and parse registry"
+    runtime:
+      language: python
+      entrypoint: |
+        import json
+
+        with open(inputs['registry_path'], 'r') as f:
+          registry = json.load(f)
+
+        # Index commands by intent tags
+        intent_index = {}
+        for tool in registry['tools']:
+          tool_id = tool['tool_id']
+          for cmd in tool.get('commands', []):
+            for intent in cmd.get('intent_tags', []):
+              if intent not in intent_index:
+                intent_index[intent] = []
+              intent_index[intent].append({
+                'tool_id': tool_id,
+                'slash': cmd.get('slash'),
+                'summary': cmd.get('summary'),
+                'command': cmd
+              })
+
+        outputs['registry'] = registry
+        outputs['intent_index'] = intent_index
+        outputs['available_intents'] = list(intent_index.keys())
+
+        print(f"Loaded registry with {len(intent_index)} unique intent tags")
+    inputs: [registry_path]
+    outputs: [registry, intent_index, available_intents]
+
+  - atom_uid: "01JADW9T0000000000000000L2"
+    atom_key: "workflows/generator/v1/analyze/all/002"
+    title: "Analyze command patterns and equivalences"
+    runtime:
+      language: python
+      entrypoint: |
+        # Analyze patterns across tools for each intent
+        workflow_patterns = {}
+
+        for intent, commands in inputs['intent_index'].items():
+          # Group by semantic similarity
+          pattern = {
+            'intent': intent,
+            'tool_count': len(set(cmd['tool_id'] for cmd in commands)),
+            'commands': commands,
+            'common_args': analyze_common_args(commands),
+            'common_outputs': analyze_common_outputs(commands),
+            'determinism_scores': [
+              cmd['command'].get('determinism_score', 0) for cmd in commands
+            ],
+            'workflow_potential': compute_workflow_potential(commands)
+          }
+
+          workflow_patterns[intent] = pattern
+
+        # Rank by workflow generation potential
+        ranked_patterns = sorted(
+          workflow_patterns.items(),
+          key=lambda x: x[1]['workflow_potential'],
+          reverse=True
+        )
+
+        outputs['workflow_patterns'] = workflow_patterns
+        outputs['ranked_patterns'] = ranked_patterns
+
+        print(f"Analyzed {len(workflow_patterns)} workflow patterns")
+    deps: ["01JADW9T0000000000000000L1"]
+    inputs: [intent_index]
+    outputs: [workflow_patterns, ranked_patterns]
+
+  - atom_uid: "01JADW9T0000000000000000L3"
+    atom_key: "workflows/generator/v1/generate/all/003"
+    title: "Generate workflow definitions"
+    runtime:
+      language: python
+      entrypoint: |
+        import os
+        import yaml
+        from datetime import datetime
+
+        generated = []
+
+        # Use provided intents or all high-potential ones
+        target_intents = inputs.get('intent_tags') or [
+          intent for intent, pattern in inputs['ranked_patterns'][:10]
+        ]
+
+        for intent in target_intents:
+          if intent not in inputs['workflow_patterns']:
+            continue
+
+          pattern = inputs['workflow_patterns'][intent]
+
+          # Generate workflow YAML
+          workflow = generate_workflow_from_pattern(intent, pattern)
+
+          # Write to file
+          filename = f"{intent.replace('.', '_')}_workflow.yaml"
+          filepath = os.path.join(inputs['output_dir'], filename)
+
+          os.makedirs(inputs['output_dir'], exist_ok=True)
+
+          with open(filepath, 'w') as f:
+            yaml.dump(workflow, f, default_flow_style=False, sort_keys=False)
+
+          generated.append({
+            'intent': intent,
+            'filepath': filepath,
+            'tool_count': pattern['tool_count']
+          })
+
+          print(f"Generated workflow: {filename}")
+
+        outputs['generated_workflows'] = generated
+    deps: ["01JADW9T0000000000000000L2"]
+    inputs: [intent_tags, workflow_patterns, ranked_patterns, output_dir]
+    outputs: [generated_workflows]
+
+  - atom_uid: "01JADW9T0000000000000000L4"
+    atom_key: "workflows/generator/v1/validate/all/004"
+    title: "Validate generated workflows"
+    runtime:
+      language: python
+      entrypoint: |
+        import jsonschema
+        import yaml
+
+        schema_path = "../atomic_two_id_tooling/atoms/schema/atomic_task.schema.json"
+        with open(schema_path, 'r') as f:
+          schema = json.load(f)
+
+        validation_results = []
+
+        for workflow_info in inputs['generated_workflows']:
+          filepath = workflow_info['filepath']
+
+          with open(filepath, 'r') as f:
+            workflow = yaml.safe_load(f)
+
+          try:
+            # Validate atoms if present
+            if 'atoms' in workflow:
+              for atom in workflow['atoms']:
+                jsonschema.validate(atom, schema)
+
+            validation_results.append({
+              'filepath': filepath,
+              'valid': True,
+              'errors': []
+            })
+          except Exception as e:
+            validation_results.append({
+              'filepath': filepath,
+              'valid': False,
+              'errors': [str(e)]
+            })
+
+        valid_count = sum(1 for r in validation_results if r['valid'])
+
+        outputs['validation_results'] = validation_results
+        outputs['all_valid'] = valid_count == len(validation_results)
+
+        print(f"Validation: {valid_count}/{len(validation_results)} workflows valid")
+    deps: ["01JADW9T0000000000000000L3"]
+    inputs: [generated_workflows]
+    outputs: [validation_results, all_valid]
+
+  - atom_uid: "01JADW9T0000000000000000L5"
+    atom_key: "workflows/generator/v1/report/all/005"
+    title: "Generate generation report"
+    runtime:
+      language: python
+      entrypoint: |
+        import json
+        from datetime import datetime
+
+        report = {
+          'generation_id': f"gen_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+          'timestamp': datetime.now().isoformat(),
+          'registry_source': inputs['registry_path'],
+          'statistics': {
+            'total_intents_analyzed': len(inputs['workflow_patterns']),
+            'workflows_generated': len(inputs['generated_workflows']),
+            'validation_passed': inputs['all_valid'],
+            'valid_workflows': sum(1 for r in inputs['validation_results'] if r['valid'])
+          },
+          'generated_workflows': inputs['generated_workflows'],
+          'validation_results': inputs['validation_results'],
+          'intent_coverage': {
+            intent: {
+              'tool_count': pattern['tool_count'],
+              'determinism_avg': sum(pattern['determinism_scores']) / len(pattern['determinism_scores'])
+                if pattern['determinism_scores'] else 0,
+              'workflow_potential': pattern['workflow_potential']
+            }
+            for intent, pattern in inputs['workflow_patterns'].items()
+          }
+        }
+
+        report_path = f"{inputs['output_dir']}/generation_report.json"
+        with open(report_path, 'w') as f:
+          json.dump(report, f, indent=2)
+
+        outputs['generation_report'] = report
+
+        print(f"\nGeneration complete!")
+        print(f"Generated {len(inputs['generated_workflows'])} workflows")
+        print(f"Report: {report_path}")
+    deps: ["01JADW9T0000000000000000L4"]
+    inputs: [registry_path, workflow_patterns, generated_workflows, validation_results,
+             all_valid, output_dir]
+    outputs: [generation_report]
+
+helper_functions:
+  analyze_common_args: |
+    def analyze_common_args(commands):
+      """Find common argument patterns across commands"""
+      all_args = []
+      for cmd in commands:
+        args_schema = cmd['command'].get('args_schema', [])
+        all_args.extend(args_schema)
+
+      # Count frequency
+      from collections import Counter
+      arg_counter = Counter(arg.get('name') for arg in all_args if 'name' in arg)
+
+      # Return args that appear in >50% of commands
+      threshold = len(commands) / 2
+      return [arg for arg, count in arg_counter.items() if count >= threshold]
+
+  analyze_common_outputs: |
+    def analyze_common_outputs(commands):
+      """Find common output patterns"""
+      all_outputs = []
+      for cmd in commands:
+        outputs = cmd['command'].get('outputs', {})
+        if isinstance(outputs, dict):
+          all_outputs.extend(outputs.get('artifacts', []))
+
+      from collections import Counter
+      return list(Counter(all_outputs).most_common(5))
+
+  compute_workflow_potential: |
+    def compute_workflow_potential(commands):
+      """Score workflow generation potential"""
+      score = 0
+
+      # More tools = higher potential for cross-tool workflow
+      score += len(set(cmd['tool_id'] for cmd in commands)) * 10
+
+      # Determinism scores
+      avg_determinism = sum(
+        cmd['command'].get('determinism_score', 0) for cmd in commands
+      ) / len(commands) if commands else 0
+      score += avg_determinism * 20
+
+      # Has defined inputs/outputs
+      has_io = sum(
+        1 for cmd in commands
+        if cmd['command'].get('inputs') or cmd['command'].get('outputs')
+      )
+      score += (has_io / len(commands)) * 15 if commands else 0
+
+      # Idempotent
+      idempotent = sum(
+        1 for cmd in commands
+        if cmd['command'].get('idempotent', False)
+      )
+      score += (idempotent / len(commands)) * 10 if commands else 0
+
+      return score
+
+  generate_workflow_from_pattern: |
+    def generate_workflow_from_pattern(intent, pattern):
+      """Generate workflow YAML from intent pattern"""
+      from datetime import datetime
+      import ulid
+
+      workflow = {
+        'meta': {
+          'workflow_id': f"{intent.replace('.', '-')}-workflow-v1",
+          'version': '1.0.0',
+          'purpose': f"Auto-generated workflow for intent: {intent}",
+          'author': 'Registry Workflow Generator',
+          'created': datetime.now().strftime('%Y-%m-%d'),
+          'generated_from': {
+            'intent': intent,
+            'tool_count': pattern['tool_count'],
+            'determinism_avg': sum(pattern['determinism_scores']) / len(pattern['determinism_scores'])
+              if pattern['determinism_scores'] else 0
+          }
+        },
+        'inputs': generate_inputs_from_pattern(pattern),
+        'outputs': generate_outputs_from_pattern(pattern),
+        'atoms': generate_atoms_from_commands(intent, pattern['commands']),
+        'execution': {
+          'mode': 'sequential',
+          'error_handling': 'rollback_on_failure'
+        }
+      }
+
+      return workflow
+
+  generate_inputs_from_pattern: |
+    def generate_inputs_from_pattern(pattern):
+      """Generate input definitions"""
+      inputs = []
+      for arg in pattern.get('common_args', []):
+        inputs.append({
+          'name': arg,
+          'kind': 'text',
+          'description': f'Input parameter: {arg}',
+          'required': True
+        })
+      return inputs or [
+        {'name': 'input_data', 'kind': 'text', 'description': 'Input data', 'required': True}
+      ]
+
+  generate_outputs_from_pattern: |
+    def generate_outputs_from_pattern(pattern):
+      """Generate output definitions"""
+      outputs = []
+      for artifact in pattern.get('common_outputs', [])[:3]:
+        outputs.append({
+          'name': artifact[0] if isinstance(artifact, tuple) else artifact,
+          'kind': 'json',
+          'description': f'Output artifact: {artifact}'
+        })
+      return outputs or [
+        {'name': 'result', 'kind': 'json', 'description': 'Workflow result'}
+      ]
+
+  generate_atoms_from_commands: |
+    def generate_atoms_from_commands(intent, commands):
+      """Generate atomic tasks from command list"""
+      import ulid
+
+      atoms = []
+
+      # Group commands by tool
+      tool_groups = {}
+      for cmd in commands:
+        tool_id = cmd['tool_id']
+        if tool_id not in tool_groups:
+          tool_groups[tool_id] = []
+        tool_groups[tool_id].append(cmd)
+
+      # Create atom for each tool variant
+      for idx, (tool_id, tool_commands) in enumerate(tool_groups.items(), 1):
+        atom_uid = str(ulid.ULID())
+        atom_key = f"workflows/{intent.replace('.', '-')}/v1/execute/{tool_id}/{idx:03d}"
+
+        atoms.append({
+          'atom_uid': atom_uid,
+          'atom_key': atom_key,
+          'title': f"Execute {intent} using {tool_id}",
+          'runtime': {
+            'language': 'bash',
+            'entrypoint': f'# Execute {intent} with {tool_id}\n# Auto-generated stub'
+          },
+          'inputs': ['input_data'],
+          'outputs': ['result']
+        })
+
+      return atoms
+
+examples:
+  - name: "Generate workflows for code review intents"
+    inputs:
+      registry_path: "../DOC & REF/slash_registry_optimized.v2.json"
+      intent_tags: ["code.review", "agents.manage"]
+
+  - name: "Generate all high-potential workflows"
+    inputs:
+      registry_path: "../DOC & REF/slash_registry_optimized.v2.json"
+      # Will auto-select top 10 by workflow_potential score

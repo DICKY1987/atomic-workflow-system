@@ -1,0 +1,207 @@
+# GitHub Checkpoint Workflow
+# Create atomic save points with automatic commit and sync
+
+meta:
+  workflow_id: "gh-checkpoint-v1"
+  version: "1.0.0"
+  purpose: "Atomic save point - commits and syncs current state to remote"
+  author: "Atomic Workflow System"
+  created: "2025-10-06"
+  based_on: "../GIT/github-deterministic-ops.md"
+
+inputs:
+  - name: context
+    kind: text
+    description: "Context message for this checkpoint (e.g., 'phase-complete', 'validation-passed')"
+    required: true
+
+  - name: branch
+    kind: text
+    description: "Branch to checkpoint (defaults to current)"
+    required: false
+
+  - name: skip_ci
+    kind: boolean
+    description: "Add [skip ci] to commit message"
+    default: true
+
+outputs:
+  - name: checkpoint_sha
+    kind: text
+    description: "Git commit SHA of the checkpoint"
+
+  - name: checkpoint_metadata
+    kind: json
+    description: "Checkpoint metadata including timestamp, context, and files changed"
+
+atoms:
+  - atom_uid: "01JADW2T0000000000000000E1"
+    atom_key: "workflows/gh-checkpoint/v1/validate/all/001"
+    title: "Validate working directory state"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        # Check if in git repo
+        if [[ ! -d ".git" ]]; then
+          echo "ERROR: Not a git repository"
+          exit 1
+        fi
+
+        # Get current branch
+        CURRENT_BRANCH=$(git branch --show-current)
+        if [[ -z "$CURRENT_BRANCH" ]]; then
+          echo "ERROR: Detached HEAD state"
+          exit 1
+        fi
+
+        # Use provided branch or current
+        TARGET_BRANCH="${inputs['branch']:-$CURRENT_BRANCH}"
+
+        # Count changes
+        CHANGES=$(git status --porcelain | wc -l)
+
+        outputs['target_branch']=$TARGET_BRANCH
+        outputs['files_changed']=$CHANGES
+
+        echo "Branch: $TARGET_BRANCH"
+        echo "Files changed: $CHANGES"
+    inputs: [branch]
+    outputs: [target_branch, files_changed]
+
+  - atom_uid: "01JADW2T0000000000000000E2"
+    atom_key: "workflows/gh-checkpoint/v1/commit/all/002"
+    title: "Create checkpoint commit"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        # Stage all changes
+        git add -A
+
+        # Generate conventional commit message
+        CONTEXT="${inputs['context']}"
+        SKIP_CI=""
+        if [[ "${inputs['skip_ci']}" == "true" ]]; then
+          SKIP_CI=" [skip ci]"
+        fi
+
+        TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        COMMIT_MSG="chore(checkpoint): ${CONTEXT}${SKIP_CI}
+
+Checkpoint created at ${TIMESTAMP}
+Files changed: ${inputs['files_changed']}"
+
+        # Create commit
+        git commit -m "$COMMIT_MSG" --no-verify || echo "No changes to commit"
+
+        CHECKPOINT_SHA=$(git rev-parse HEAD)
+        outputs['checkpoint_sha']=$CHECKPOINT_SHA
+
+        echo "Checkpoint created: $CHECKPOINT_SHA"
+    deps: ["01JADW2T0000000000000000E1"]
+    inputs: [context, skip_ci, files_changed]
+    outputs: [checkpoint_sha]
+
+  - atom_uid: "01JADW2T0000000000000000E3"
+    atom_key: "workflows/gh-checkpoint/v1/push/all/003"
+    title: "Push to remote with force-with-lease"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        BRANCH="${inputs['target_branch']}"
+
+        # Push with force-with-lease (safe force push)
+        git push --force-with-lease origin "$BRANCH"
+
+        # Verify remote sync
+        REMOTE_SHA=$(git rev-parse "origin/$BRANCH")
+        LOCAL_SHA=$(git rev-parse HEAD)
+
+        if [[ "$REMOTE_SHA" == "$LOCAL_SHA" ]]; then
+          outputs['push_success']=true
+          echo "Successfully synced to remote"
+        else
+          outputs['push_success']=false
+          echo "WARNING: Remote diverged from local"
+        fi
+    deps: ["01JADW2T0000000000000000E2"]
+    inputs: [target_branch]
+    outputs: [push_success]
+
+  - atom_uid: "01JADW2T0000000000000000E4"
+    atom_key: "workflows/gh-checkpoint/v1/metadata/all/004"
+    title: "Generate checkpoint metadata"
+    runtime:
+      language: python
+      entrypoint: |
+        import json
+        import subprocess
+        from datetime import datetime
+
+        # Get commit details
+        sha = inputs['checkpoint_sha']
+
+        # Get files changed in this commit
+        result = subprocess.run(
+          ['git', 'show', '--stat', '--format=', sha],
+          capture_output=True,
+          text=True
+        )
+
+        metadata = {
+          'checkpoint_id': sha,
+          'context': inputs['context'],
+          'branch': inputs['target_branch'],
+          'timestamp': datetime.now().isoformat(),
+          'files_changed': inputs['files_changed'],
+          'changes_summary': result.stdout.strip(),
+          'pushed_to_remote': inputs['push_success']
+        }
+
+        # Append to checkpoint registry
+        registry_path = '.workflows/checkpoints/registry.jsonl'
+        with open(registry_path, 'a') as f:
+          f.write(json.dumps(metadata) + '\n')
+
+        outputs['checkpoint_metadata'] = metadata
+    deps: ["01JADW2T0000000000000000E3"]
+    inputs: [checkpoint_sha, context, target_branch, files_changed, push_success]
+    outputs: [checkpoint_metadata]
+
+execution:
+  mode: sequential
+  error_handling: abort_on_failure
+  retry_strategy:
+    push_failure:
+      max_attempts: 3
+      backoff: exponential
+      actions:
+        - fetch_remote
+        - rebase
+        - retry_push
+
+observability:
+  metrics:
+    - checkpoints_created
+    - push_success_rate
+    - average_checkpoint_time
+
+  audit_trail:
+    path: ".workflows/checkpoints/registry.jsonl"
+
+examples:
+  - name: "Checkpoint after validation"
+    command: |
+      ./gh_checkpoint.sh --context "validation-passed"
+
+  - name: "Checkpoint with custom branch"
+    command: |
+      ./gh_checkpoint.sh --context "feature-complete" --branch "feature/new-api"

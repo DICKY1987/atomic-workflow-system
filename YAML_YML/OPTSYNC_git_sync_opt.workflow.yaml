@@ -1,0 +1,190 @@
+workflow:
+  ns: OPTSYNC
+  wf: GIT_SYNC_OPT
+  wfv: v1
+  title: "Optimized Local→Repo Sync with Safety Nets"
+  purpose: "Deterministic, auditable, and fast path to align local changes with origin/main using native Git + PS wrappers."
+  assumptions:
+    - "Git is installed and in PATH."
+    - "Origin remote is reachable and authenticated."
+    - "Edits occur inside a cloned repo OR we migrate once and then stay inside the repo."
+    - "CRLF/LF normalization handled by .gitattributes."
+  invariants:
+    - "Never mutate main directly without a fast-forward or a review branch."
+    - "Every change is traceable to a branch and a commit."
+    - "No content diffing via ad-hoc hashing; rely on Git status/diff."
+  registry_generated: true
+
+atoms:
+  - atom_uid: 01JADK3B0V0Q4W9E8H7M2R5K1X
+    atom_key: OPTSYNC/GIT_SYNC_OPT/v1/PH0/INIT/001
+    title: Detect-or-clone repo
+    description: |
+      If working dir lacks .git, clone the repo to a known workspace; else reuse the existing clone.
+    deps: []
+    inputs:
+      - repo_url
+      - workspace_dir
+    outputs:
+      - repo_path
+    commands:
+      - pwsh: >
+          if (!(Test-Path "$env:WORKSPACE\.git")) {
+            git clone $env:REPO_URL "$env:WORKSPACE"
+          }
+    acceptance_criteria:
+      - ".git directory exists at repo_path"
+
+  - atom_uid: 01JADK3B0V0Q4W9E8H7M2R5K2Y
+    atom_key: OPTSYNC/GIT_SYNC_OPT/v1/PH1/SAFETY/002
+    title: Configure identity & safety knobs
+    description: |
+      Set git user.name/email if missing; enable rebase/fast-forward pulls; set push.default and useful defaults.
+    deps: [OPTSYNC/GIT_SYNC_OPT/v1/PH0/INIT/001]
+    commands:
+      - pwsh: >
+          git -C "$env:WORKSPACE" config --get user.email || git -C "$env:WORKSPACE" config user.email "$env:GIT_EMAIL";
+          git -C "$env:WORKSPACE" config --get user.name  || git -C "$env:WORKSPACE" config user.name  "$env:GIT_NAME";
+          git -C "$env:WORKSPACE" config pull.ff only;
+          git -C "$env:WORKSPACE" config pull.rebase false;
+          git -C "$env:WORKSPACE" config push.default simple
+    acceptance_criteria:
+      - "git config shows user.name and user.email"
+      - "pull.ff=only is set"
+
+  - atom_uid: 01JADK3B0V0Q4W9E8H7M2R5K3Z
+    atom_key: OPTSYNC/GIT_SYNC_OPT/v1/PH1/SAFETY/003
+    title: Normalize line-endings
+    description: |
+      Ensure .gitattributes enforces consistent EOL to prevent noisy diffs.
+    deps: [OPTSYNC/GIT_SYNC_OPT/v1/PH0/INIT/001]
+    commands:
+      - pwsh: >
+          $p = Join-Path $env:WORKSPACE ".gitattributes";
+          if (!(Test-Path $p)) {
+            @"
+* text=auto
+"@ | Out-File -Encoding ascii $p;
+            git -C "$env:WORKSPACE" add .gitattributes
+          }
+    acceptance_criteria:
+      - ".gitattributes exists and is tracked"
+
+  - atom_uid: 01JADK3B0V0Q4W9E8H7M2R5K4A
+    atom_key: OPTSYNC/GIT_SYNC_OPT/v1/PH2/UPDATE/004
+    title: Sync local clone with origin/main
+    description: "Fetch/prune all; checkout main; fast-forward pull."
+    deps:
+      - OPTSYNC/GIT_SYNC_OPT/v1/PH1/SAFETY/002
+    commands:
+      - pwsh: >
+          git -C "$env:WORKSPACE" fetch --all --prune;
+          git -C "$env:WORKSPACE" checkout main;
+          git -C "$env:WORKSPACE" pull --ff-only origin main
+    acceptance_criteria:
+      - "HEAD is at origin/main"
+      - "No local divergence"
+
+  - atom_uid: 01JADK3B0V0Q4W9E8H7M2R5K5B
+    atom_key: OPTSYNC/GIT_SYNC_OPT/v1/PH2/UPDATE/005
+    title: Create isolated work branch
+    description: "Create/update a branch named sync/<short-context>-<yyyymmdd-hhmmss>."
+    deps: [OPTSYNC/GIT_SYNC_OPT/v1/PH2/UPDATE/004]
+    outputs: [work_branch]
+    commands:
+      - pwsh: >
+          $ts = Get-Date -Format "yyyyMMdd-HHmmss";
+          $name = "sync/local-opt-" + $ts;
+          git -C "$env:WORKSPACE" checkout -b $name
+    acceptance_criteria:
+      - "New branch exists and is checked out"
+
+  - atom_uid: 01JADK3B0V0Q4W9E8H7M2R5K6C
+    atom_key: OPTSYNC/GIT_SYNC_OPT/v1/PH3/EDIT/006
+    title: Ensure edits happen inside repo working tree
+    description: |
+      Move or open the working folder in the cloned repo (no external mirror). Optionally stage helper files.
+    deps: [OPTSYNC/GIT_SYNC_OPT/v1/PH2/UPDATE/005]
+    acceptance_criteria:
+      - "User confirms edits are in $env:WORKSPACE (not a separate non-git folder)"
+
+  - atom_uid: 01JADK3B0V0Q4W9E8H7M2R5K7D
+    atom_key: OPTSYNC/GIT_SYNC_OPT/v1/PH3/EDIT/007
+    title: Stage & commit changes atomically
+    description: "Rely on git status/diff; no hash loops. Single cohesive commit with conventional message."
+    deps: [OPTSYNC/GIT_SYNC_OPT/v1/PH3/EDIT/006]
+    commands:
+      - pwsh: >
+          git -C "$env:WORKSPACE" add -A;
+          if (git -C "$env:WORKSPACE" diff --cached --quiet) { exit 0 }
+          git -C "$env:WORKSPACE" commit -m "chore(sync): align local changes with origin/main [deterministic]"
+    acceptance_criteria:
+      - "Commit exists or no-op if no changes"
+
+  - atom_uid: 01JADK3B0V0Q4W9E8H7M2R5K8E
+    atom_key: OPTSYNC/GIT_SYNC_OPT/v1/PH4/INTEGRATE/008
+    title: Push work branch to origin
+    description: "Push the branch and set upstream."
+    deps: [OPTSYNC/GIT_SYNC_OPT/v1/PH3/EDIT/007]
+    commands:
+      - pwsh: >
+          git -C "$env:WORKSPACE" push -u origin HEAD
+    acceptance_criteria:
+      - "Remote branch exists with matching HEAD"
+
+  - atom_uid: 01JADK3B0V0Q4W9E8H7M2R5K9F
+    atom_key: OPTSYNC/GIT_SYNC_OPT/v1/PH4/INTEGRATE/009
+    title: Fast-forward main (or open PR)
+    description: |
+      Try ff-only from main. If not possible, open PR and block until review passes.
+    deps:
+      - OPTSYNC/GIT_SYNC_OPT/v1/PH4/INTEGRATE/008
+    commands:
+      - pwsh: >
+          git -C "$env:WORKSPACE" checkout main;
+          git -C "$env:WORKSPACE" pull --ff-only;
+          git -C "$env:WORKSPACE" merge --ff-only @{u} 2>$null; if ($LASTEXITCODE -ne 0) { exit 2 }
+      - note: "If exit code 2, open PR via gh CLI or web; merge after checks."
+    acceptance_criteria:
+      - "origin/main advanced via FF; else PR exists and is mergeable"
+
+  - atom_uid: 01JADK3B0V0Q4W9E8H7M2R5KAF
+    atom_key: OPTSYNC/GIT_SYNC_OPT/v1/PH5/SAFENETS/010
+    title: Enable safety net autosaves
+    description: |
+      Add preconfigured scripts/aliases to checkpoint WIP on timer or shell-exit (e.g., WIP branches).
+    deps: [OPTSYNC/GIT_SYNC_OPT/v1/PH2/UPDATE/004]
+    acceptance_criteria:
+      - "WIP checkpoint job/alias installed and test-push succeeds"
+
+  - atom_uid: 01JADK3B0V0Q4W9E8H7M2R5KBF
+    atom_key: OPTSYNC/GIT_SYNC_OPT/v1/PH6/VERIFY/011
+    title: Post-merge verification & clean-up
+    description: |
+      Validate latest commit on main, run quick CI job (lint/tests), and delete merged work branch.
+    deps:
+      - OPTSYNC/GIT_SYNC_OPT/v1/PH4/INTEGRATE/009
+    commands:
+      - pwsh: >
+          git -C "$env:WORKSPACE" checkout main;
+          git -C "$env:WORKSPACE" pull --ff-only;
+          git -C "$env:WORKSPACE" branch --merged main | % { if ($_ -match "^\s+sync/") { git -C "$env:WORKSPACE" branch -d ($_ -replace '\s','') } }
+    acceptance_criteria:
+      - "CI green (or recorded failures with ticket)"
+      - "Merged sync/* branches deleted locally"
+
+  - atom_uid: 01JADK3B0V0Q4W9E8H7M2R5KCF
+    atom_key: OPTSYNC/GIT_SYNC_OPT/v1/PH7/RECOVERY/012
+    title: Recovery & rollback playbook
+    description: |
+      Provide immediate commands for reflog, soft-reset, and cherry-pick to undo mistakes deterministically.
+    deps: []
+    outputs:
+      - "doc: RECOVERY.md snippet or cheat-sheet"
+    commands:
+      - note: |
+          - Undo last commit (keep changes): git reset --soft HEAD~1
+          - Restore file from main: git checkout origin/main -- path/to/file
+          - Find lost work: git reflog; git cherry-pick <commit>
+    acceptance_criteria:
+      - "Recovery doc present in repo or ops runbook"

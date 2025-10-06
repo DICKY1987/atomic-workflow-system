@@ -1,0 +1,20 @@
+workflow:
+  ns: DOC
+  wf: workflow_execution_breakdown
+  wfv: v1
+  title: "Workflow Execution Breakdown"
+  purpose: >
+    Breaks down the execution of an atomic workflow into phases and subphases.  The document lists
+    atoms for initialization (environment setup, verification & sanity checks), lane preparation
+    (creation of simple, moderate and complex branches), agent assignment, subsequent planning,
+    execution, validation, integration and reporting.  It serves as a template for understanding how
+    a complete atomic workflow runs end‑to‑end.
+  atoms:
+    - atom_uid: 01DOC016ABCDEFGHIJKLMNOPQR
+      atom_key: DOC/workflow_execution_breakdown/v1/doc/all/001
+      title: "Workflow execution breakdown documentation"
+      description: >
+        Contains the phased breakdown of workflow execution, enumerating tasks across initialization,
+        lane preparation, agent assignment and beyond.  Use this atom as a starting point for
+        implementing or analysing end‑to‑end atomic workflows.
+      source_file: "ATOMIZED_PROCESSES/workflow_execution_breakdown.md"

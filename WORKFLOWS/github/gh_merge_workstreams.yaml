@@ -1,0 +1,282 @@
+# GitHub Merge Workstreams Workflow
+# Merge multiple parallel workstream branches without conflicts
+
+meta:
+  workflow_id: "gh-merge-workstreams-v1"
+  version: "1.0.0"
+  purpose: "Deterministically merge multiple parallel workstreams with conflict resolution"
+  author: "Atomic Workflow System"
+  created: "2025-10-06"
+
+inputs:
+  - name: workstream_branches
+    kind: table
+    description: "List of workstream branch names to merge"
+    required: true
+
+  - name: integration_branch
+    kind: text
+    description: "Target integration branch"
+    required: true
+
+  - name: base_branch
+    kind: text
+    description: "Base branch for integration"
+    default: "main"
+
+  - name: merge_strategy
+    kind: text
+    description: "Merge strategy: no-ff | squash | rebase"
+    default: "no-ff"
+
+outputs:
+  - name: merge_result
+    kind: json
+    description: "Merge results for each workstream"
+
+  - name: conflicts_resolved
+    kind: json
+    description: "Details of conflicts and resolutions"
+
+  - name: integration_sha
+    kind: text
+    description: "Final integration commit SHA"
+
+atoms:
+  - atom_uid: "01JADW7T0000000000000000J1"
+    atom_key: "workflows/gh-merge/v1/init/all/001"
+    title: "Initialize integration branch"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        BASE="${inputs['base_branch']}"
+        INTEGRATION="${inputs['integration_branch']}"
+
+        # Create/checkout integration branch from base
+        git fetch origin
+        git checkout -B "$INTEGRATION" "origin/$BASE"
+
+        outputs['integration_branch_ready']=true
+
+        echo "Integration branch ready: $INTEGRATION"
+    inputs: [base_branch, integration_branch]
+    outputs: [integration_branch_ready]
+
+  - atom_uid: "01JADW7T0000000000000000J2"
+    atom_key: "workflows/gh-merge/v1/analyze/all/002"
+    title: "Analyze workstreams for conflicts"
+    runtime:
+      language: python
+      entrypoint: |
+        import subprocess
+        import json
+
+        branches = inputs['workstream_branches']
+        conflict_predictions = []
+
+        # Analyze file changes per branch
+        file_map = {}  # file -> [branches]
+
+        for branch in branches:
+          result = subprocess.run(
+            ['git', 'diff', '--name-only', f'origin/{inputs["base_branch"]}...{branch}'],
+            capture_output=True,
+            text=True
+          )
+
+          for file_path in result.stdout.strip().split('\n'):
+            if file_path:
+              if file_path not in file_map:
+                file_map[file_path] = []
+              file_map[file_path].append(branch)
+
+        # Identify potential conflicts
+        for file_path, affected_branches in file_map.items():
+          if len(affected_branches) > 1:
+            conflict_predictions.append({
+              'file': file_path,
+              'branches': affected_branches,
+              'severity': 'high' if len(affected_branches) > 2 else 'medium'
+            })
+
+        outputs['conflict_predictions'] = conflict_predictions
+        outputs['total_files'] = len(file_map)
+
+        print(f"Analyzed {len(branches)} branches, {len(file_map)} files")
+        print(f"Potential conflicts: {len(conflict_predictions)}")
+    deps: ["01JADW7T0000000000000000J1"]
+    inputs: [workstream_branches, base_branch]
+    outputs: [conflict_predictions, total_files]
+
+  - atom_uid: "01JADW7T0000000000000000J3"
+    atom_key: "workflows/gh-merge/v1/merge/all/003"
+    title: "Merge workstreams sequentially"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        STRATEGY="${inputs['merge_strategy']}"
+        MERGED_COUNT=0
+        CONFLICT_COUNT=0
+        MERGE_RESULTS="[]"
+
+        for BRANCH in ${inputs['workstream_branches']}; do
+          echo "Merging: $BRANCH"
+
+          set +e
+          case "$STRATEGY" in
+            no-ff)
+              git merge --no-ff --strategy-option=patience "$BRANCH" \
+                -m "Merge workstream: $BRANCH"
+              ;;
+            squash)
+              git merge --squash "$BRANCH"
+              git commit -m "Squash merge: $BRANCH"
+              ;;
+            rebase)
+              git rebase "$BRANCH"
+              ;;
+          esac
+          MERGE_STATUS=$?
+          set -e
+
+          if [[ $MERGE_STATUS -eq 0 ]]; then
+            MERGED_COUNT=$((MERGED_COUNT + 1))
+            RESULT="success"
+          else
+            # Conflict detected
+            CONFLICT_COUNT=$((CONFLICT_COUNT + 1))
+
+            # Auto-resolve using merge drivers
+            if [[ -f ".gitattributes" ]]; then
+              python3 ../deterministic_merge_system/scripts/auto_resolve.py || true
+            fi
+
+            # Check if resolved
+            if git diff --check &>/dev/null; then
+              git add -A
+              git commit --no-edit
+              MERGED_COUNT=$((MERGED_COUNT + 1))
+              RESULT="auto-resolved"
+            else
+              RESULT="conflict"
+              # Abort this merge
+              git merge --abort || true
+            fi
+          fi
+
+          # Record result
+          MERGE_RESULTS=$(echo "$MERGE_RESULTS" | jq --arg branch "$BRANCH" --arg result "$RESULT" \
+            '. + [{"branch": $branch, "result": $result}]')
+
+        done
+
+        outputs['merged_count']=$MERGED_COUNT
+        outputs['conflict_count']=$CONFLICT_COUNT
+        outputs['merge_results']=$(echo "$MERGE_RESULTS")
+
+        echo "Merged: $MERGED_COUNT, Conflicts: $CONFLICT_COUNT"
+    deps: ["01JADW7T0000000000000000J2"]
+    inputs: [workstream_branches, merge_strategy]
+    outputs: [merged_count, conflict_count, merge_results]
+
+  - atom_uid: "01JADW7T0000000000000000J4"
+    atom_key: "workflows/gh-merge/v1/validate/all/004"
+    title: "Run validation on merged state"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        VALIDATION_PASSED=true
+
+        # Run linter
+        if command -v black &>/dev/null; then
+          black --check . || VALIDATION_PASSED=false
+        fi
+
+        # Run quick tests
+        if [[ -f "pytest.ini" ]]; then
+          pytest --maxfail=3 -x || VALIDATION_PASSED=false
+        fi
+
+        outputs['validation_passed']=$VALIDATION_PASSED
+
+        echo "Validation: $VALIDATION_PASSED"
+    deps: ["01JADW7T0000000000000000J3"]
+    outputs: [validation_passed]
+
+  - atom_uid: "01JADW7T0000000000000000J5"
+    atom_key: "workflows/gh-merge/v1/finalize/all/005"
+    title: "Finalize and push integration branch"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        if [[ "${inputs['validation_passed']}" == "true" ]]; then
+          INTEGRATION_SHA=$(git rev-parse HEAD)
+
+          # Push integration branch
+          git push -u origin "${inputs['integration_branch']}"
+
+          outputs['integration_sha']=$INTEGRATION_SHA
+          outputs['pushed']=true
+
+          echo "Integration complete: $INTEGRATION_SHA"
+        else
+          outputs['integration_sha']="none"
+          outputs['pushed']=false
+          echo "Validation failed - not pushing"
+        fi
+    deps: ["01JADW7T0000000000000000J4"]
+    inputs: [validation_passed, integration_branch]
+    outputs: [integration_sha, pushed]
+
+  - atom_uid: "01JADW7T0000000000000000J6"
+    atom_key: "workflows/gh-merge/v1/report/all/006"
+    title: "Generate merge report"
+    runtime:
+      language: python
+      entrypoint: |
+        import json
+        from datetime import datetime
+
+        report = {
+          'integration_branch': inputs['integration_branch'],
+          'base_branch': inputs['base_branch'],
+          'workstreams': {
+            'total': len(inputs['workstream_branches']),
+            'merged': inputs['merged_count'],
+            'conflicts': inputs['conflict_count']
+          },
+          'merge_strategy': inputs['merge_strategy'],
+          'results': inputs['merge_results'],
+          'conflict_predictions': inputs['conflict_predictions'],
+          'validation_passed': inputs['validation_passed'],
+          'integration_sha': inputs['integration_sha'],
+          'pushed': inputs['pushed'],
+          'timestamp': datetime.now().isoformat()
+        }
+
+        with open('.workflows/merge_report.json', 'w') as f:
+          json.dump(report, f, indent=2)
+
+        outputs['merge_result'] = report
+        outputs['conflicts_resolved'] = {
+          'predicted': len(inputs['conflict_predictions']),
+          'actual': inputs['conflict_count'],
+          'auto_resolved': inputs['merged_count'] - (len(inputs['workstream_branches']) - inputs['conflict_count'])
+        }
+    deps: ["01JADW7T0000000000000000J5"]
+    inputs: [integration_branch, base_branch, workstream_branches, merged_count, conflict_count,
+             merge_strategy, merge_results, conflict_predictions, validation_passed,
+             integration_sha, pushed]
+    outputs: [merge_result, conflicts_resolved]

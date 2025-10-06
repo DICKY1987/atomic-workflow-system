@@ -1,0 +1,20 @@
+workflow:
+  ns: DOC
+  wf: newtoolinstal
+  wfv: v1
+  title: "New Tool Instal (Generic Atomic Workflow)"
+  purpose: >
+    Synthesises a tool‑agnostic atomic workflow based on installation and setup scripts.  The document
+    abstracts away specific CLI installers (winget, choco, npm, pipx) and platforms (Codex, Claude,
+    Gemini) and instead focuses on the logical sequence of tasks, mirroring the Generic Atomic
+    Workflow with environment preparation, intake and scoping, planning, execution and validation.
+  atoms:
+    - atom_uid: 01DOC014ABCDEFGHIJKLMNOPQR
+      atom_key: DOC/newtoolinstal/v1/doc/all/001
+      title: "New tool instal workflow documentation"
+      description: >
+        Encapsulates the textual blueprint of a tool‑agnostic installation workflow.  It adapts the
+        Generic Atomic Workflow tasks to the context of installing new tools or dependencies while
+        preserving the same phases and single‑responsibility principles.  Use this as a guide when
+        creating installation workflows.
+      source_file: "ATOMIZED_PROCESSES/newtoolinstal.md"

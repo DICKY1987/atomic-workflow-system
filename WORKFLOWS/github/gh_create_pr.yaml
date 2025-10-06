@@ -1,0 +1,268 @@
+# GitHub Create PR Workflow
+# Create or update pull request with complete metadata
+
+meta:
+  workflow_id: "gh-create-pr-v1"
+  version: "1.0.0"
+  purpose: "Create or update pull request with comprehensive context"
+  author: "Atomic Workflow System"
+  created: "2025-10-06"
+
+inputs:
+  - name: branch_name
+    kind: text
+    description: "Source branch for PR"
+    required: true
+
+  - name: base_branch
+    kind: text
+    description: "Target branch for PR"
+    default: "main"
+
+  - name: auto_merge
+    kind: boolean
+    description: "Enable auto-merge when checks pass"
+    default: false
+
+  - name: reviewers
+    kind: table
+    description: "GitHub usernames to request reviews from"
+    required: false
+
+outputs:
+  - name: pr_number
+    kind: number
+    description: "Pull request number"
+
+  - name: pr_url
+    kind: text
+    description: "Pull request URL"
+
+  - name: pr_info
+    kind: json
+    description: "Complete PR metadata"
+
+atoms:
+  - atom_uid: "01JADW4T0000000000000000G1"
+    atom_key: "workflows/gh-create-pr/v1/validate/all/001"
+    title: "Validate branch is pushed and current"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        BRANCH="${inputs['branch_name']}"
+
+        # Ensure branch exists locally
+        if ! git rev-parse --verify "$BRANCH" &>/dev/null; then
+          echo "ERROR: Branch $BRANCH does not exist"
+          exit 1
+        fi
+
+        # Push branch to remote
+        git push -u origin "$BRANCH"
+
+        # Verify remote tracking
+        REMOTE_BRANCH=$(git config "branch.${BRANCH}.merge" | sed 's|refs/heads/||')
+
+        outputs['remote_tracking']=true
+
+        echo "Branch $BRANCH is pushed and tracking origin"
+    inputs: [branch_name]
+    outputs: [remote_tracking]
+
+  - atom_uid: "01JADW4T0000000000000000G2"
+    atom_key: "workflows/gh-create-pr/v1/check/all/002"
+    title: "Check if PR already exists"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        BRANCH="${inputs['branch_name']}"
+
+        # Check for existing PR
+        EXISTING_PR=$(gh pr list --head "$BRANCH" --json number,state --jq '.[0].number' || echo "")
+
+        if [[ -n "$EXISTING_PR" ]]; then
+          outputs['pr_exists']=true
+          outputs['existing_pr_number']=$EXISTING_PR
+          echo "PR already exists: #$EXISTING_PR"
+        else
+          outputs['pr_exists']=false
+          outputs['existing_pr_number']=0
+          echo "No existing PR found"
+        fi
+    deps: ["01JADW4T0000000000000000G1"]
+    inputs: [branch_name]
+    outputs: [pr_exists, existing_pr_number]
+
+  - atom_uid: "01JADW4T0000000000000000G3"
+    atom_key: "workflows/gh-create-pr/v1/generate/all/003"
+    title: "Generate PR title and description"
+    runtime:
+      language: python
+      entrypoint: |
+        import subprocess
+        import re
+
+        branch = inputs['branch_name']
+        base = inputs['base_branch']
+
+        # Generate title from branch name
+        title_parts = branch.replace('feature/', '').replace('_', ' ').split('/')
+        title = ' '.join(title_parts).title()
+
+        # Get commit history
+        result = subprocess.run(
+          ['git', 'log', f'origin/{base}..{branch}', '--oneline'],
+          capture_output=True,
+          text=True
+        )
+        commits = result.stdout.strip()
+
+        # Get file changes
+        result = subprocess.run(
+          ['git', 'diff', '--stat', f'origin/{base}...{branch}'],
+          capture_output=True,
+          text=True
+        )
+        changes = result.stdout.strip()
+
+        # Generate comprehensive description
+        description = f"""## Summary
+This PR contains changes from the `{branch}` branch.
+
+## Commits
+```
+{commits}
+```
+
+## Files Changed
+```
+{changes}
+```
+
+## Validation
+- [ ] Tests passing
+- [ ] Linting passing
+- [ ] Documentation updated
+
+---
+🤖 Generated with Atomic Workflow System
+"""
+
+        outputs['pr_title'] = title
+        outputs['pr_description'] = description
+    deps: ["01JADW4T0000000000000000G2"]
+    inputs: [branch_name, base_branch]
+    outputs: [pr_title, pr_description]
+
+  - atom_uid: "01JADW4T0000000000000000G4"
+    atom_key: "workflows/gh-create-pr/v1/create/all/004"
+    title: "Create or update PR"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        if [[ "${inputs['pr_exists']}" == "true" ]]; then
+          # Update existing PR
+          PR_NUMBER="${inputs['existing_pr_number']}"
+
+          gh pr edit "$PR_NUMBER" \
+            --title "${inputs['pr_title']}" \
+            --body "${inputs['pr_description']}"
+
+          outputs['pr_number']=$PR_NUMBER
+          outputs['pr_action']="updated"
+
+          echo "Updated PR #$PR_NUMBER"
+        else
+          # Create new PR
+          REVIEWERS=""
+          if [[ -n "${inputs['reviewers']}" ]]; then
+            REVIEWERS="--reviewer ${inputs['reviewers']}"
+          fi
+
+          gh pr create \
+            --title "${inputs['pr_title']}" \
+            --body "${inputs['pr_description']}" \
+            --base "${inputs['base_branch']}" \
+            --head "${inputs['branch_name']}" \
+            $REVIEWERS
+
+          PR_NUMBER=$(gh pr view "${inputs['branch_name']}" --json number --jq '.number')
+
+          outputs['pr_number']=$PR_NUMBER
+          outputs['pr_action']="created"
+
+          echo "Created PR #$PR_NUMBER"
+        fi
+    deps: ["01JADW4T0000000000000000G3"]
+    inputs: [pr_exists, existing_pr_number, pr_title, pr_description, base_branch, branch_name, reviewers]
+    outputs: [pr_number, pr_action]
+
+  - atom_uid: "01JADW4T0000000000000000G5"
+    atom_key: "workflows/gh-create-pr/v1/automerge/all/005"
+    title: "Enable auto-merge if requested"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        if [[ "${inputs['auto_merge']}" == "true" ]]; then
+          gh pr merge "${inputs['pr_number']}" --auto --squash
+
+          outputs['auto_merge_enabled']=true
+          echo "Auto-merge enabled for PR #${inputs['pr_number']}"
+        else
+          outputs['auto_merge_enabled']=false
+        fi
+    deps: ["01JADW4T0000000000000000G4"]
+    inputs: [auto_merge, pr_number]
+    outputs: [auto_merge_enabled]
+
+  - atom_uid: "01JADW4T0000000000000000G6"
+    atom_key: "workflows/gh-create-pr/v1/metadata/all/006"
+    title: "Collect PR metadata"
+    runtime:
+      language: python
+      entrypoint: |
+        import subprocess
+        import json
+
+        pr_number = inputs['pr_number']
+
+        # Get PR details
+        result = subprocess.run(
+          ['gh', 'pr', 'view', str(pr_number), '--json',
+           'number,url,title,state,reviewDecision,mergeable,statusCheckRollup'],
+          capture_output=True,
+          text=True
+        )
+
+        pr_data = json.loads(result.stdout)
+
+        pr_info = {
+          'pr_number': pr_number,
+          'pr_url': pr_data['url'],
+          'title': pr_data['title'],
+          'state': pr_data['state'],
+          'mergeable': pr_data.get('mergeable', 'UNKNOWN'),
+          'review_decision': pr_data.get('reviewDecision'),
+          'auto_merge_enabled': inputs['auto_merge_enabled'],
+          'action': inputs['pr_action']
+        }
+
+        outputs['pr_url'] = pr_data['url']
+        outputs['pr_info'] = pr_info
+
+        print(f"\nPR URL: {pr_data['url']}")
+    deps: ["01JADW4T0000000000000000G5"]
+    inputs: [pr_number, auto_merge_enabled, pr_action]
+    outputs: [pr_url, pr_info]

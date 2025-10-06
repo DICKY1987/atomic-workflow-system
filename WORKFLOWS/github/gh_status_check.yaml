@@ -1,0 +1,258 @@
+# GitHub Status Check Workflow
+# Comprehensive repository and workflow status check
+
+meta:
+  workflow_id: "gh-status-check-v1"
+  version: "1.0.0"
+  purpose: "Check comprehensive repository, CI/CD, and PR status"
+  author: "Atomic Workflow System"
+  created: "2025-10-06"
+
+inputs:
+  - name: branch_name
+    kind: text
+    description: "Branch to check (defaults to current)"
+    required: false
+
+  - name: verbose
+    kind: boolean
+    description: "Include detailed output"
+    default: false
+
+outputs:
+  - name: status_report
+    kind: json
+    description: "Comprehensive status report"
+
+  - name: ready_to_merge
+    kind: boolean
+    description: "Overall readiness indicator"
+
+atoms:
+  - atom_uid: "01JADW5T0000000000000000H1"
+    atom_key: "workflows/gh-status/v1/local/all/001"
+    title: "Check local workspace status"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        BRANCH="${inputs['branch_name']:-$(git branch --show-current)}"
+        git checkout "$BRANCH" 2>/dev/null || true
+
+        # Check working tree
+        DIRTY_FILES=$(git status --porcelain | wc -l)
+        CLEAN=$([[ $DIRTY_FILES -eq 0 ]] && echo "true" || echo "false")
+
+        # Check commits ahead/behind
+        AHEAD=$(git rev-list --count "@{u}..HEAD" 2>/dev/null || echo "0")
+        BEHIND=$(git rev-list --count "HEAD..@{u}" 2>/dev/null || echo "0")
+
+        # Check untracked files
+        UNTRACKED=$(git ls-files --others --exclude-standard | wc -l)
+
+        outputs['working_tree_clean']=$CLEAN
+        outputs['dirty_files']=$DIRTY_FILES
+        outputs['commits_ahead']=$AHEAD
+        outputs['commits_behind']=$BEHIND
+        outputs['untracked_files']=$UNTRACKED
+        outputs['current_branch']=$BRANCH
+
+        echo "Branch: $BRANCH"
+        echo "Clean: $CLEAN (dirty: $DIRTY_FILES, untracked: $UNTRACKED)"
+        echo "Commits: +$AHEAD -$BEHIND"
+    inputs: [branch_name]
+    outputs: [working_tree_clean, dirty_files, commits_ahead, commits_behind, untracked_files, current_branch]
+
+  - atom_uid: "01JADW5T0000000000000000H2"
+    atom_key: "workflows/gh-status/v1/remote/all/002"
+    title: "Check remote branch status"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        BRANCH="${inputs['current_branch']}"
+
+        # Check if branch exists on remote
+        if git ls-remote --exit-code --heads origin "$BRANCH" &>/dev/null; then
+          outputs['remote_exists']=true
+
+          # Get remote commit SHA
+          REMOTE_SHA=$(git rev-parse "origin/$BRANCH")
+          LOCAL_SHA=$(git rev-parse HEAD)
+
+          if [[ "$REMOTE_SHA" == "$LOCAL_SHA" ]]; then
+            outputs['in_sync']=true
+          else
+            outputs['in_sync']=false
+          fi
+        else
+          outputs['remote_exists']=false
+          outputs['in_sync']=false
+        fi
+
+        echo "Remote exists: ${outputs['remote_exists']}"
+        echo "In sync: ${outputs['in_sync']}"
+    deps: ["01JADW5T0000000000000000H1"]
+    inputs: [current_branch]
+    outputs: [remote_exists, in_sync]
+
+  - atom_uid: "01JADW5T0000000000000000H3"
+    atom_key: "workflows/gh-status/v1/pr/all/003"
+    title: "Check PR status if exists"
+    runtime:
+      language: python
+      entrypoint: |
+        import subprocess
+        import json
+
+        branch = inputs['current_branch']
+
+        # Check for PR
+        result = subprocess.run(
+          ['gh', 'pr', 'view', branch, '--json',
+           'number,state,reviewDecision,mergeable,statusCheckRollup,reviews'],
+          capture_output=True,
+          text=True
+        )
+
+        if result.returncode == 0:
+          pr_data = json.loads(result.stdout)
+
+          outputs['pr_exists'] = True
+          outputs['pr_number'] = pr_data['number']
+          outputs['pr_state'] = pr_data['state']
+          outputs['pr_mergeable'] = pr_data.get('mergeable', 'UNKNOWN')
+          outputs['review_decision'] = pr_data.get('reviewDecision', 'PENDING')
+
+          # Count check statuses
+          checks = pr_data.get('statusCheckRollup', [])
+          passing = sum(1 for c in checks if c.get('conclusion') == 'SUCCESS')
+          failing = sum(1 for c in checks if c.get('conclusion') == 'FAILURE')
+
+          outputs['checks_passing'] = passing
+          outputs['checks_failing'] = failing
+        else:
+          outputs['pr_exists'] = False
+          outputs['pr_number'] = 0
+          outputs['pr_state'] = 'NONE'
+          outputs['pr_mergeable'] = 'N/A'
+          outputs['review_decision'] = 'N/A'
+          outputs['checks_passing'] = 0
+          outputs['checks_failing'] = 0
+    deps: ["01JADW5T0000000000000000H2"]
+    inputs: [current_branch]
+    outputs: [pr_exists, pr_number, pr_state, pr_mergeable, review_decision, checks_passing, checks_failing]
+
+  - atom_uid: "01JADW5T0000000000000000H4"
+    atom_key: "workflows/gh-status/v1/ci/all/004"
+    title: "Check CI/CD workflow runs"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        BRANCH="${inputs['current_branch']}"
+
+        # Get latest workflow runs
+        LATEST_RUN=$(gh run list --branch "$BRANCH" --limit 1 --json status,conclusion,workflowName --jq '.[0]' || echo "{}")
+
+        if [[ "$LATEST_RUN" != "{}" ]]; then
+          STATUS=$(echo "$LATEST_RUN" | jq -r '.status // "none"')
+          CONCLUSION=$(echo "$LATEST_RUN" | jq -r '.conclusion // "none"')
+          WORKFLOW=$(echo "$LATEST_RUN" | jq -r '.workflowName // "unknown"')
+
+          outputs['ci_running']=$([[ "$STATUS" == "in_progress" ]] && echo "true" || echo "false")
+          outputs['ci_conclusion']=$CONCLUSION
+          outputs['ci_workflow']=$WORKFLOW
+        else
+          outputs['ci_running']=false
+          outputs['ci_conclusion']="none"
+          outputs['ci_workflow']="none"
+        fi
+
+        echo "CI Status: ${outputs['ci_conclusion']}"
+    deps: ["01JADW5T0000000000000000H3"]
+    inputs: [current_branch]
+    outputs: [ci_running, ci_conclusion, ci_workflow]
+
+  - atom_uid: "01JADW5T0000000000000000H5"
+    atom_key: "workflows/gh-status/v1/report/all/005"
+    title: "Generate comprehensive status report"
+    runtime:
+      language: python
+      entrypoint: |
+        import json
+        from datetime import datetime
+
+        # Determine overall readiness
+        ready = (
+          inputs['working_tree_clean'] and
+          inputs['in_sync'] and
+          inputs['pr_mergeable'] in ['MERGEABLE', 'N/A'] and
+          inputs['review_decision'] in ['APPROVED', 'N/A'] and
+          inputs['checks_failing'] == 0 and
+          inputs['ci_conclusion'] in ['success', 'none']
+        )
+
+        report = {
+          'timestamp': datetime.now().isoformat(),
+          'branch': inputs['current_branch'],
+          'ready_to_merge': ready,
+          'workspace': {
+            'clean': inputs['working_tree_clean'],
+            'dirty_files': inputs['dirty_files'],
+            'untracked_files': inputs['untracked_files'],
+            'commits_ahead': inputs['commits_ahead'],
+            'commits_behind': inputs['commits_behind']
+          },
+          'remote': {
+            'exists': inputs['remote_exists'],
+            'in_sync': inputs['in_sync']
+          },
+          'pull_request': {
+            'exists': inputs['pr_exists'],
+            'number': inputs['pr_number'],
+            'state': inputs['pr_state'],
+            'mergeable': inputs['pr_mergeable'],
+            'review_decision': inputs['review_decision']
+          },
+          'checks': {
+            'passing': inputs['checks_passing'],
+            'failing': inputs['checks_failing']
+          },
+          'ci_cd': {
+            'running': inputs['ci_running'],
+            'latest_conclusion': inputs['ci_conclusion'],
+            'workflow': inputs['ci_workflow']
+          }
+        }
+
+        # Write report
+        with open('.workflows/status_report.json', 'w') as f:
+          json.dump(report, f, indent=2)
+
+        outputs['status_report'] = report
+        outputs['ready_to_merge'] = ready
+
+        # Print summary
+        print("\n=== Status Summary ===")
+        print(f"Branch: {inputs['current_branch']}")
+        print(f"Ready to merge: {'✅ YES' if ready else '❌ NO'}")
+        print(f"Working tree: {'✅ Clean' if inputs['working_tree_clean'] else '⚠️  Dirty'}")
+        print(f"Remote sync: {'✅ Synced' if inputs['in_sync'] else '⚠️  Out of sync'}")
+        if inputs['pr_exists']:
+          print(f"PR #{inputs['pr_number']}: {inputs['pr_state']} ({inputs['pr_mergeable']})")
+          print(f"Reviews: {inputs['review_decision']}")
+          print(f"Checks: {inputs['checks_passing']} passing, {inputs['checks_failing']} failing")
+        print(f"CI: {inputs['ci_conclusion']}")
+    deps: ["01JADW5T0000000000000000H4"]
+    inputs: [current_branch, working_tree_clean, dirty_files, untracked_files, commits_ahead,
+             commits_behind, remote_exists, in_sync, pr_exists, pr_number, pr_state,
+             pr_mergeable, review_decision, checks_passing, checks_failing, ci_running,
+             ci_conclusion, ci_workflow]
+    outputs: [status_report, ready_to_merge]

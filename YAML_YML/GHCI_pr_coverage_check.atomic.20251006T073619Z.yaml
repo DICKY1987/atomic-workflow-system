@@ -1,0 +1,40 @@
+workflow:
+  ns: GHCI
+  wf: PR_COVERAGE_CHECK
+  wfv: v1
+  title: "PR test coverage gate"
+  trigger:
+    on: [pull_request]
+    branches: [main]
+  purpose: "Block merges that reduce coverage below threshold."
+  assumptions:
+    - "Python project with pytest + coverage config present."
+  invariants:
+    - "Coverage threshold configured in tool or env."
+  registry_generated: true
+
+atoms:
+  - atom_uid: 01JAX0A0PRCOV001
+    atom_key: GHCI/PR_COVERAGE_CHECK/v1/PH1/SETUP/001
+    title: Setup Python
+    deps: []
+    commands:
+      - gha: "actions/checkout@v4"
+      - gha: "actions/setup-python@v5"
+      - run: "python -m pip install -U pip pytest pytest-cov"
+
+  - atom_uid: 01JAX0A0PRCOV002
+    atom_key: GHCI/PR_COVERAGE_CHECK/v1/PH2/TEST/002
+    title: Run tests with coverage
+    deps: [GHCI/PR_COVERAGE_CHECK/v1/PH1/SETUP/001]
+    commands:
+      - run: "pytest --maxfail=1 --disable-warnings -q --cov=. --cov-report=xml"
+
+  - atom_uid: 01JAX0A0PRCOV003
+    atom_key: GHCI/PR_COVERAGE_CHECK/v1/PH3/GATE/003
+    title: Enforce coverage threshold
+    deps: [GHCI/PR_COVERAGE_CHECK/v1/PH2/TEST/002]
+    commands:
+      - run: "python scripts/coverage_gate.py --min 85 --report coverage.xml || exit 1"
+    acceptance_criteria:
+      - "coverage >= 85%"

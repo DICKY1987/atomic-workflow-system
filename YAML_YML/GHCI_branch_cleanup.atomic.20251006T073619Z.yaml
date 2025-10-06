@@ -1,0 +1,32 @@
+workflow:
+  ns: GHCI
+  wf: BRANCH_CLEANUP
+  wfv: v1
+  title: "Merged branch cleanup"
+  trigger:
+    on:
+      schedule: ["0 3 * * 0"]  # Sundays 03:00 UTC
+      workflow_dispatch: {}
+  purpose: "Delete remote branches merged into main to reduce repo clutter."
+  invariants:
+    - "Never delete protected branches."
+  registry_generated: true
+
+atoms:
+  - atom_uid: 01JAX0A0BRCLEAN001
+    atom_key: GHCI/BRANCH_CLEANUP/v1/PH1/CHECKOUT/001
+    title: Checkout and fetch
+    deps: []
+    commands:
+      - gha: "actions/checkout@v4"
+      - run: "git fetch --all --prune"
+
+  - atom_uid: 01JAX0A0BRCLEAN002
+    atom_key: GHCI/BRANCH_CLEANUP/v1/PH2/CLEAN/002
+    title: Delete merged branches
+    deps: [GHCI/BRANCH_CLEANUP/v1/PH1/CHECKOUT/001]
+    commands:
+      - run: |
+          python scripts/cleanup_merged_branches.py --base main --protect main develop release/*
+    acceptance_criteria:
+      - "No non-protected merged branches remain"

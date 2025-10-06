@@ -1,0 +1,20 @@
+workflow:
+  ns: DOC
+  wf: add_remove_reorder_atoms
+  wfv: v1
+  title: "Add, Remove & Reorder Atoms"
+  purpose: >
+    Explains how atomic tasks can be added, removed or reordered without rewriting entire workflows.
+    Leveraging the Two‑ID model, it describes strategies such as minting new atom_uids, choosing human
+    keys using gap numbering or suffixes, updating dependencies, marking atoms as deprecated, and
+    preserving registry entries.  The document serves as a set of guidelines for evolving workflows
+    safely.
+  atoms:
+    - atom_uid: 01DOC011ABCDEFGHIJKLMNOPQR
+      atom_key: DOC/add_remove_reorder_atoms/v1/doc/all/001
+      title: "Modification guidelines documentation"
+      description: >
+        Summarises the rules for adding, removing and reordering atoms.  It includes step‑by‑step
+        procedures for minting new identifiers, numbering sequences, marking removed atoms and
+        updating dependency graphs.  Refer to this atom when modifying atomic workflows.
+      source_file: "ATOMIZED_PROCESSES/add_remove_reorder atoms.md"

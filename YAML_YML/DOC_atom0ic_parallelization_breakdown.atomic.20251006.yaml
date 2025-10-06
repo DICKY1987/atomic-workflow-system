@@ -1,0 +1,21 @@
+workflow:
+  ns: DOC
+  wf: atom0ic_parallelization_breakdown
+  wfv: v1
+  title: "Atomic Parallelization Breakdown"
+  purpose: >
+    Provides a granular breakdown of decisions for parallelizing multi‑agent tasks.  The document
+    emphasises maximum atomic granularity and lists a large number of atoms across phases such as
+    Claude code analysis processing, codebase context extraction, user document integration and
+    architectural constraint parsing.  Each atom details a single responsibility to support
+    independently testable parallelization.
+  atoms:
+    - atom_uid: 01DOC012ABCDEFGHIJKLMNOPQR
+      atom_key: DOC/atom0ic_parallelization_breakdown/v1/doc/all/001
+      title: "Parallelization breakdown documentation"
+      description: >
+        Encapsulates the full specification of the atomic parallelization breakdown.  Tasks include
+        detecting analysis completion signals, validating artifacts, extracting repository structure and
+        dependencies, parsing user documents, and applying architectural constraints.  This atom can
+        be decomposed into smaller atoms in future iterations.
+      source_file: "ATOMIZED_PROCESSES/atom0ic_parallelization_breakdown.md"

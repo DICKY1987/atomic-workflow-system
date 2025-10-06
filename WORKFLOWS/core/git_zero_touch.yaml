@@ -1,0 +1,370 @@
+# Git Zero-Touch Automation Wrapper
+# Wraps AI tool sessions with automatic Git safety and checkpointing
+
+meta:
+  workflow_id: "git-zero-touch-v1"
+  version: "1.0.0"
+  purpose: "Provide automatic Git safety for AI coding tool sessions with zero user intervention"
+  author: "Atomic Workflow System"
+  created: "2025-10-06"
+  based_on: "../GIT/git_zero_touch_tool_session.v1.yaml"
+
+inputs:
+  - name: tool_binary
+    kind: text
+    description: "AI tool binary to wrap (claude, aider, gemini, etc.)"
+    required: true
+
+  - name: tool_args
+    kind: table
+    description: "Arguments to pass to the tool"
+    required: false
+
+  - name: session_name
+    kind: text
+    description: "Optional session identifier"
+    required: false
+
+  - name: branch_strategy
+    kind: text
+    description: "Branch strategy: session_branch | dedicated_branch | worktree"
+    default: "session_branch"
+
+  - name: checkpoint_frequency
+    kind: text
+    description: "Checkpoint frequency: on_exit | on_change | interval"
+    default: "on_exit"
+
+outputs:
+  - name: session_branch
+    kind: text
+    description: "Branch name created for this session"
+
+  - name: checkpoint_ids
+    kind: table
+    description: "List of checkpoint commit SHAs"
+
+  - name: session_report
+    kind: json
+    description: "Session statistics and Git operations performed"
+
+atoms:
+  - atom_uid: "01JADVYS0000000000000000B1"
+    atom_key: "workflows/git-zero-touch/v1/init/all/001"
+    title: "Initialize Git safety environment"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        # Verify we're in a git repo
+        if [[ ! -d ".git" ]]; then
+          echo "ERROR: Not a git repository"
+          exit 1
+        fi
+
+        # Configure git settings for safety
+        git config --local rerere.enabled true
+        git config --local rerere.autoupdate true
+        git config --local merge.conflictstyle zdiff3
+        git config --local push.default current
+        git config --local push.autoSetupRemote true
+        git config --local rebase.autoStash true
+
+        # Export tool name for hooks
+        export AI_TOOL_NAME=$(basename "$inputs['tool_binary']")
+        export SESSION_ID="${inputs['session_name']:-$(date +%Y%m%d_%H%M%S)}"
+
+        outputs['ai_tool_name']=$AI_TOOL_NAME
+        outputs['session_id']=$SESSION_ID
+    inputs: [tool_binary, session_name]
+    outputs: [ai_tool_name, session_id]
+
+  - atom_uid: "01JADVYS0000000000000000B2"
+    atom_key: "workflows/git-zero-touch/v1/checkpoint/all/002"
+    title: "Create pre-session checkpoint"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        # Create checkpoint before session starts
+        git add -A || true
+        git commit -m "checkpoint: before ${AI_TOOL_NAME} session [${SESSION_ID}]" \
+          --no-verify || echo "No changes to checkpoint"
+
+        CHECKPOINT_SHA=$(git rev-parse HEAD)
+        outputs['pre_session_checkpoint']=$CHECKPOINT_SHA
+
+        echo "Pre-session checkpoint: $CHECKPOINT_SHA"
+    deps: ["01JADVYS0000000000000000B1"]
+    inputs: [ai_tool_name, session_id]
+    outputs: [pre_session_checkpoint]
+
+  - atom_uid: "01JADVYS0000000000000000B3"
+    atom_key: "workflows/git-zero-touch/v1/branch/all/003"
+    title: "Create or checkout session branch"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        STRATEGY="${inputs['branch_strategy']}"
+
+        case "$STRATEGY" in
+          session_branch)
+            # Create unique branch for this session
+            BRANCH="${AI_TOOL_NAME}/${SESSION_ID}"
+            git checkout -b "$BRANCH" 2>/dev/null || git checkout "$BRANCH"
+            ;;
+
+          dedicated_branch)
+            # Use tool-specific dedicated branch
+            BRANCH="tool/${AI_TOOL_NAME}/main"
+            git checkout -b "$BRANCH" 2>/dev/null || git checkout "$BRANCH"
+            git pull origin "$BRANCH" --rebase || true
+            ;;
+
+          worktree)
+            # Create worktree for isolation
+            WORKTREE_DIR="../${AI_TOOL_NAME}-workspace"
+            BRANCH="tool/${AI_TOOL_NAME}/main"
+            git worktree add "$WORKTREE_DIR" "$BRANCH" 2>/dev/null || \
+              echo "Worktree already exists"
+            cd "$WORKTREE_DIR"
+            ;;
+        esac
+
+        outputs['session_branch']=$BRANCH
+        echo "Session branch: $BRANCH"
+    deps: ["01JADVYS0000000000000000B2"]
+    inputs: [branch_strategy, ai_tool_name, session_id]
+    outputs: [session_branch]
+
+  - atom_uid: "01JADVYS0000000000000000B4"
+    atom_key: "workflows/git-zero-touch/v1/hooks/all/004"
+    title: "Install Git hooks for auto-save"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        # Create pre-close hook
+        cat > .git/hooks/pre-close <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+WORK_IN_PROGRESS=$(git status --porcelain)
+if [ -n "$WORK_IN_PROGRESS" ]; then
+  TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+  TOOL_NAME=${AI_TOOL_NAME:-"unknown"}
+  git add -A
+  git commit -m "WIP: Auto-save from ${TOOL_NAME} [${TIMESTAMP}]" \
+    -m "Auto-checkpoint before session end" \
+    --no-verify || true
+  BACKUP_BRANCH="wip/${TOOL_NAME}/${TIMESTAMP}"
+  git push -u origin HEAD:${BACKUP_BRANCH} --no-verify 2>/dev/null || true
+  echo "saved:${BACKUP_BRANCH}"
+fi
+EOF
+        chmod +x .git/hooks/pre-close
+
+        # Create post-commit hook for auto-push
+        cat > .git/hooks/post-commit <<'EOF'
+#!/usr/bin/env bash
+git push origin HEAD:refs/heads/auto-backup/$(git branch --show-current) \
+  --force-with-lease 2>/dev/null || true
+EOF
+        chmod +x .git/hooks/post-commit
+
+        outputs['hooks_installed']=true
+    deps: ["01JADVYS0000000000000000B3"]
+    outputs: [hooks_installed]
+
+  - atom_uid: "01JADVYS0000000000000000B5"
+    atom_key: "workflows/git-zero-touch/v1/execute/all/005"
+    title: "Execute wrapped tool session"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set +e  # Don't exit on tool failure
+
+        # Run the AI tool
+        TOOL_BINARY="${inputs['tool_binary']}"
+        TOOL_ARGS="${inputs['tool_args']}"
+
+        echo "Starting ${AI_TOOL_NAME} session..."
+        $TOOL_BINARY $TOOL_ARGS
+
+        TOOL_EXIT_CODE=$?
+
+        # Capture any changes made during session
+        CHANGES=$(git status --porcelain | wc -l)
+
+        outputs['tool_exit_code']=$TOOL_EXIT_CODE
+        outputs['files_changed']=$CHANGES
+
+        echo "Session ended. Exit code: $TOOL_EXIT_CODE, Files changed: $CHANGES"
+    deps: ["01JADVYS0000000000000000B4"]
+    inputs: [tool_binary, tool_args, ai_tool_name]
+    outputs: [tool_exit_code, files_changed]
+
+  - atom_uid: "01JADVYS0000000000000000B6"
+    atom_key: "workflows/git-zero-touch/v1/checkpoint/all/006"
+    title: "Create post-session checkpoint"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        # Check if there are changes to commit
+        if [[ $(git status --porcelain | wc -l) -gt 0 ]]; then
+          git add -A
+          git commit -m "checkpoint: after ${AI_TOOL_NAME} session [${SESSION_ID}]" \
+            -m "Exit code: ${inputs['tool_exit_code']}" \
+            -m "Files changed: ${inputs['files_changed']}" \
+            --no-verify
+
+          POST_SHA=$(git rev-parse HEAD)
+          outputs['post_session_checkpoint']=$POST_SHA
+
+          # Push to remote with force-with-lease
+          git push origin "${SESSION_BRANCH}" --force-with-lease || \
+            echo "Warning: Push failed, changes are local only"
+
+          echo "Post-session checkpoint: $POST_SHA"
+        else
+          outputs['post_session_checkpoint']="${inputs['pre_session_checkpoint']}"
+          echo "No changes to checkpoint"
+        fi
+    deps: ["01JADVYS0000000000000000B5"]
+    inputs: [ai_tool_name, session_id, tool_exit_code, files_changed,
+             pre_session_checkpoint, session_branch]
+    outputs: [post_session_checkpoint]
+
+  - atom_uid: "01JADVYS0000000000000000B7"
+    atom_key: "workflows/git-zero-touch/v1/report/all/007"
+    title: "Generate session report"
+    runtime:
+      language: python
+      entrypoint: |
+        import json
+        from datetime import datetime
+
+        report = {
+          'session_id': inputs['session_id'],
+          'tool_name': inputs['ai_tool_name'],
+          'branch': inputs['session_branch'],
+          'checkpoints': {
+            'pre_session': inputs['pre_session_checkpoint'],
+            'post_session': inputs['post_session_checkpoint']
+          },
+          'statistics': {
+            'files_changed': inputs['files_changed'],
+            'exit_code': inputs['tool_exit_code']
+          },
+          'git_operations': {
+            'commits_created': 2 if inputs['files_changed'] > 0 else 1,
+            'branches_created': 1,
+            'hooks_installed': inputs['hooks_installed']
+          },
+          'timestamp': datetime.now().isoformat(),
+          'success': inputs['tool_exit_code'] == 0
+        }
+
+        report_path = f".workflows/sessions/{inputs['session_id']}_report.json"
+        with open(report_path, 'w') as f:
+          json.dump(report, f, indent=2)
+
+        outputs['session_report'] = report
+    deps: ["01JADVYS0000000000000000B6"]
+    inputs: [session_id, ai_tool_name, session_branch, pre_session_checkpoint,
+             post_session_checkpoint, files_changed, tool_exit_code, hooks_installed]
+    outputs: [session_report]
+
+platform_variants:
+  windows:
+    runtime: powershell
+    hooks:
+      pre_close: |
+        # PowerShell pre-close hook
+        $ts = Get-Date -Format "yyyyMMdd_HHmmss"
+        git add -A | Out-Null
+        git commit -m "WIP: Auto-save on exit [$ts]" --no-verify | Out-Null
+        $branch = git branch --show-current
+        if (-not [string]::IsNullOrEmpty($branch)) {
+          git push origin "HEAD:refs/heads/wip/$branch" --force-with-lease | Out-Null
+        }
+
+  unix:
+    runtime: bash
+    hooks:
+      pre_close: |
+        #!/usr/bin/env bash
+        # Bash pre-close hook (as defined above)
+
+safety_features:
+  auto_commit:
+    enabled: true
+    message_format: "checkpoint: {phase} {tool_name} [{timestamp}]"
+
+  auto_push:
+    enabled: true
+    strategy: "force-with-lease"  # Safe force push
+
+  branch_protection:
+    never_auto_push_to: ["main", "master", "production"]
+    require_confirmation_for: ["develop", "staging"]
+
+  rollback:
+    enabled: true
+    strategy: "revert_to_checkpoint"
+    preserve_history: true
+
+observability:
+  metrics:
+    - sessions_count
+    - checkpoints_created
+    - auto_saves_triggered
+    - push_success_rate
+    - average_session_duration
+
+  audit_trail:
+    path: ".workflows/audit/git_zero_touch.jsonl"
+    format: jsonl
+    fields:
+      - timestamp
+      - tool_name
+      - session_id
+      - branch
+      - operation
+      - result
+
+execution:
+  mode: sequential
+  error_handling: checkpoint_and_continue
+  cleanup:
+    - "Remove temporary hooks on failure"
+    - "Stash uncommitted changes"
+    - "Return to original branch"
+
+examples:
+  - name: "Wrap Claude Code session"
+    command: |
+      # Run this workflow wrapper
+      ./git_zero_touch.sh claude --session-name "feature-work"
+
+  - name: "Wrap Aider with worktree isolation"
+    command: |
+      # Use worktree strategy for parallel sessions
+      ./git_zero_touch.sh aider --branch-strategy worktree
+
+  - name: "PowerShell wrapper for Windows"
+    command: |
+      # PowerShell equivalent
+      .\git_zero_touch.ps1 -ToolBinary "claude" -BranchStrategy "session_branch"

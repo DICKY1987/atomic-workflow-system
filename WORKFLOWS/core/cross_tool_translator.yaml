@@ -1,0 +1,374 @@
+# Cross-Tool Workflow Translator
+# Translates workflows between different AI coding tools using slash command registry
+
+meta:
+  workflow_id: "cross-tool-translator-v1"
+  version: "1.0.0"
+  purpose: "Translate workflow definitions between AI coding tools (Claude Code, Aider, Gemini CLI, Copilot, Continue)"
+  author: "Atomic Workflow System"
+  created: "2025-10-06"
+  registry_source: "../DOC & REF/slash_registry_optimized.v2.json"
+
+inputs:
+  - name: source_workflow
+    kind: file
+    mime: application/yaml
+    description: "Source workflow file to translate"
+    required: true
+
+  - name: source_tool
+    kind: text
+    description: "Source tool ID (claude_code, aider, gemini_cli, etc.)"
+    required: true
+
+  - name: target_tools
+    kind: table
+    description: "List of target tool IDs to translate to"
+    required: true
+
+  - name: registry_path
+    kind: file
+    mime: application/json
+    description: "Path to slash_registry_optimized.v2.json"
+    default: "../DOC & REF/slash_registry_optimized.v2.json"
+
+outputs:
+  - name: translated_workflows
+    kind: table
+    description: "Map of tool_id -> translated workflow file path"
+
+  - name: compatibility_report
+    kind: json
+    description: "Report of command mappings, conflicts, and missing features"
+
+  - name: platform_variants
+    kind: table
+    description: "Platform-specific variants (windows, linux, macos)"
+
+translation_rules:
+  command_mapping:
+    strategy: "registry_lookup"
+    steps:
+      - "Load slash_registry_optimized.v2.json"
+      - "For each command in source workflow, find equivalent in target tool"
+      - "Check intent_tags for semantic equivalence"
+      - "Verify inputs/outputs compatibility"
+      - "Map arg_schema if present"
+
+  conflict_resolution:
+    - pattern: "command_missing"
+      action: "find_alternative_by_intent_tags"
+      fallback: "use_shell_equivalent"
+
+    - pattern: "incompatible_args"
+      action: "adapt_args_to_target_schema"
+      fallback: "flag_manual_review"
+
+    - pattern: "platform_specific"
+      action: "generate_platform_variants"
+      variants: ["windows", "linux", "macos"]
+
+  equivalence_matching:
+    priority:
+      - "exact_slash_match"          # /help -> /help
+      - "intent_tag_match"            # agents.manage, code.review
+      - "semantic_similarity"         # /review -> /security-review
+      - "shell_command_equivalent"    # git commands via shell_core
+      - "manual_fallback"             # flag for human review
+
+atoms:
+  - atom_uid: "01JADVXR0000000000000000A1"
+    atom_key: "workflows/translator/v1/load/all/001"
+    title: "Load slash command registry"
+    runtime:
+      language: python
+      entrypoint: |
+        import json
+        with open(inputs['registry_path'], 'r') as f:
+            registry = json.load(f)
+        # Index by tool_id for fast lookup
+        tool_index = {tool['tool_id']: tool for tool in registry['tools']}
+        outputs['tool_index'] = tool_index
+    inputs: [registry_path]
+    outputs: [tool_index]
+
+  - atom_uid: "01JADVXR0000000000000000A2"
+    atom_key: "workflows/translator/v1/parse/all/002"
+    title: "Parse source workflow"
+    runtime:
+      language: python
+      entrypoint: |
+        import yaml
+        with open(inputs['source_workflow'], 'r') as f:
+            workflow = yaml.safe_load(f)
+        # Extract commands used
+        commands = extract_commands_from_workflow(workflow)
+        outputs['commands'] = commands
+        outputs['workflow_structure'] = workflow
+    deps: ["01JADVXR0000000000000000A1"]
+    inputs: [source_workflow]
+    outputs: [commands, workflow_structure]
+
+  - atom_uid: "01JADVXR0000000000000000A3"
+    atom_key: "workflows/translator/v1/map/all/003"
+    title: "Map commands to target tools"
+    runtime:
+      language: python
+      entrypoint: |
+        mappings = {}
+        for target_tool in inputs['target_tools']:
+            tool_mapping = {}
+            for cmd in inputs['commands']:
+                # Find equivalent command in target tool
+                equivalent = find_equivalent_command(
+                    source_cmd=cmd,
+                    source_tool=inputs['source_tool'],
+                    target_tool=target_tool,
+                    registry=inputs['tool_index']
+                )
+                tool_mapping[cmd] = equivalent
+            mappings[target_tool] = tool_mapping
+        outputs['command_mappings'] = mappings
+    deps: ["01JADVXR0000000000000000A2"]
+    inputs: [commands, source_tool, target_tools, tool_index]
+    outputs: [command_mappings]
+
+  - atom_uid: "01JADVXR0000000000000000A4"
+    atom_key: "workflows/translator/v1/detect/all/004"
+    title: "Detect conflicts and missing features"
+    runtime:
+      language: python
+      entrypoint: |
+        conflicts = []
+        missing = []
+        for tool, mappings in inputs['command_mappings'].items():
+            for src_cmd, tgt_cmd in mappings.items():
+                if tgt_cmd is None:
+                    missing.append({
+                        'tool': tool,
+                        'command': src_cmd,
+                        'reason': 'no_equivalent_found'
+                    })
+                elif 'conflicts_with' in tgt_cmd and tgt_cmd['conflicts_with']:
+                    conflicts.append({
+                        'tool': tool,
+                        'command': src_cmd,
+                        'conflicts': tgt_cmd['conflicts_with']
+                    })
+        outputs['conflicts'] = conflicts
+        outputs['missing_features'] = missing
+    deps: ["01JADVXR0000000000000000A3"]
+    inputs: [command_mappings]
+    outputs: [conflicts, missing_features]
+
+  - atom_uid: "01JADVXR0000000000000000A5"
+    atom_key: "workflows/translator/v1/generate/all/005"
+    title: "Generate translated workflows"
+    runtime:
+      language: python
+      entrypoint: |
+        translated = {}
+        for tool, mappings in inputs['command_mappings'].items():
+            # Clone workflow structure
+            new_workflow = deep_copy(inputs['workflow_structure'])
+            # Replace commands with target equivalents
+            new_workflow = replace_commands(new_workflow, mappings)
+            # Add metadata
+            new_workflow['meta']['target_tool'] = tool
+            new_workflow['meta']['translated_from'] = inputs['source_tool']
+            new_workflow['meta']['translation_date'] = datetime.now().isoformat()
+            # Write to file
+            output_path = f"workflows/{tool}/translated_{workflow_id}.yaml"
+            with open(output_path, 'w') as f:
+                yaml.dump(new_workflow, f)
+            translated[tool] = output_path
+        outputs['translated_workflows'] = translated
+    deps: ["01JADVXR0000000000000000A4"]
+    inputs: [command_mappings, workflow_structure, source_tool]
+    outputs: [translated_workflows]
+
+  - atom_uid: "01JADVXR0000000000000000A6"
+    atom_key: "workflows/translator/v1/platform/all/006"
+    title: "Generate platform-specific variants"
+    runtime:
+      language: python
+      entrypoint: |
+        platforms = ['windows', 'linux', 'macos']
+        platform_variants = {}
+        for tool, workflow_path in inputs['translated_workflows'].items():
+            tool_variants = {}
+            workflow = load_yaml(workflow_path)
+            for platform in platforms:
+                variant = generate_platform_variant(workflow, platform, inputs['tool_index'])
+                variant_path = workflow_path.replace('.yaml', f'.{platform}.yaml')
+                with open(variant_path, 'w') as f:
+                    yaml.dump(variant, f)
+                tool_variants[platform] = variant_path
+            platform_variants[tool] = tool_variants
+        outputs['platform_variants'] = platform_variants
+    deps: ["01JADVXR0000000000000000A5"]
+    inputs: [translated_workflows, tool_index]
+    outputs: [platform_variants]
+
+  - atom_uid: "01JADVXR0000000000000000A7"
+    atom_key: "workflows/translator/v1/report/all/007"
+    title: "Generate compatibility report"
+    runtime:
+      language: python
+      entrypoint: |
+        report = {
+            'source_tool': inputs['source_tool'],
+            'target_tools': list(inputs['command_mappings'].keys()),
+            'commands_mapped': len(inputs['commands']),
+            'conflicts': inputs['conflicts'],
+            'missing_features': inputs['missing_features'],
+            'translation_success_rate': calculate_success_rate(inputs),
+            'recommendations': generate_recommendations(inputs),
+            'timestamp': datetime.now().isoformat()
+        }
+        with open('compatibility_report.json', 'w') as f:
+            json.dump(report, f, indent=2)
+        outputs['compatibility_report'] = report
+    deps: ["01JADVXR0000000000000000A6"]
+    inputs: [source_tool, command_mappings, commands, conflicts, missing_features]
+    outputs: [compatibility_report]
+
+helper_functions:
+  extract_commands_from_workflow: |
+    def extract_commands_from_workflow(workflow):
+        """Extract all slash commands and shell commands from workflow"""
+        commands = set()
+        def recurse(obj):
+            if isinstance(obj, dict):
+                if 'slash' in obj:
+                    commands.add(obj['slash'])
+                if 'command' in obj and isinstance(obj['command'], str):
+                    commands.add(obj['command'])
+                for v in obj.values():
+                    recurse(v)
+            elif isinstance(obj, list):
+                for item in obj:
+                    recurse(item)
+        recurse(workflow)
+        return list(commands)
+
+  find_equivalent_command: |
+    def find_equivalent_command(source_cmd, source_tool, target_tool, registry):
+        """Find equivalent command in target tool using multiple strategies"""
+        src_tool_data = registry[source_tool]
+        tgt_tool_data = registry[target_tool]
+
+        # Strategy 1: Exact slash match
+        for cmd in tgt_tool_data['commands']:
+            if cmd.get('slash') == source_cmd:
+                return cmd
+
+        # Strategy 2: Find source command details
+        src_cmd_data = None
+        for cmd in src_tool_data['commands']:
+            if cmd.get('slash') == source_cmd:
+                src_cmd_data = cmd
+                break
+
+        if not src_cmd_data:
+            return None
+
+        # Strategy 3: Intent tag match
+        if src_cmd_data.get('intent_tags'):
+            for cmd in tgt_tool_data['commands']:
+                if set(cmd.get('intent_tags', [])) & set(src_cmd_data['intent_tags']):
+                    return cmd
+
+        # Strategy 4: Check equivalents field
+        if 'equivalents' in src_cmd_data:
+            for equiv in src_cmd_data['equivalents']:
+                if equiv.get('tool_id') == target_tool:
+                    return equiv
+
+        # Strategy 5: Semantic similarity (summary match)
+        src_summary = src_cmd_data.get('summary', '').lower()
+        best_match = None
+        best_score = 0
+        for cmd in tgt_tool_data['commands']:
+            tgt_summary = cmd.get('summary', '').lower()
+            score = compute_similarity(src_summary, tgt_summary)
+            if score > best_score and score > 0.7:
+                best_score = score
+                best_match = cmd
+
+        return best_match
+
+  generate_platform_variant: |
+    def generate_platform_variant(workflow, platform, registry):
+        """Generate platform-specific workflow variant"""
+        variant = deep_copy(workflow)
+        variant['meta']['platform'] = platform
+
+        # Filter atoms by platform support
+        if 'atoms' in variant:
+            variant['atoms'] = [
+                atom for atom in variant['atoms']
+                if platform in atom.get('runtime', {}).get('platforms', [platform])
+            ]
+
+        # Adjust shell commands for platform
+        if platform == 'windows':
+            # Replace bash with powershell/cmd
+            replace_shell_runtime(variant, 'bash', 'powershell')
+
+        return variant
+
+execution:
+  mode: sequential
+  error_handling: rollback_on_failure
+  checkpointing: after_each_atom
+  parallelization:
+    enabled: true
+    max_parallel: 3
+    # Atoms 3-6 can run in parallel per target tool
+
+validation:
+  pre_conditions:
+    - "Source workflow file exists"
+    - "Registry file exists and is valid JSON"
+    - "Source tool exists in registry"
+    - "All target tools exist in registry"
+
+  post_conditions:
+    - "All translated workflows are valid YAML"
+    - "All translated workflows contain required metadata"
+    - "Compatibility report generated"
+    - "Success rate > 70% (warning if lower)"
+
+observability:
+  metrics:
+    - translation_success_rate
+    - commands_mapped_count
+    - conflicts_detected_count
+    - missing_features_count
+    - target_tools_count
+
+  logs:
+    format: jsonl
+    path: ".workflows/logs/translation_{timestamp}.jsonl"
+
+examples:
+  - name: "Translate Claude Code workflow to Aider"
+    inputs:
+      source_workflow: "my_workflow.yaml"
+      source_tool: "claude_code"
+      target_tools: ["aider"]
+    expected_outputs:
+      translated_workflows:
+        aider: "workflows/aider/translated_my_workflow.yaml"
+
+  - name: "Multi-tool translation"
+    inputs:
+      source_workflow: "git_automation.yaml"
+      source_tool: "claude_code"
+      target_tools: ["aider", "gemini_cli", "copilot_chat", "continue_vscode"]
+    expected_outputs:
+      compatibility_report:
+        conflicts: []
+        missing_features: []
+        translation_success_rate: 0.95

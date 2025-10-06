@@ -1,0 +1,38 @@
+[
+  {
+    "repo_url": "https://github.com/YourOrg/ProjectA.git",
+    "repo_path": "C:\\Repos\\ProjectA",
+    "remote_name": "origin",
+    "branch": "main",
+    "auto_clone": true,
+    "hard_sync": false,
+    "force": false,
+    "is_clean": false,
+    "is_dirty": false,
+    "last_synced": null
+  },
+  {
+    "repo_url": "https://github.com/YourOrg/BackendAPI.git",
+    "repo_path": "D:\\Automation\\BackendAPI",
+    "remote_name": "origin",
+    "branch": "develop",
+    "auto_clone": true,
+    "hard_sync": true,
+    "force": true,
+    "is_clean": false,
+    "is_dirty": false,
+    "last_synced": null
+  },
+  {
+    "repo_url": "git@github.com:YourOrg/FrontendWebApp.git",
+    "repo_path": "C:\\Projects\\FrontendWebApp",
+    "remote_name": "origin",
+    "branch": "release",
+    "auto_clone": false,
+    "hard_sync": false,
+    "force": true,
+    "is_clean": false,
+    "is_dirty": true,
+    "last_synced": "2025-10-04T12:00:00Z"
+  }
+]

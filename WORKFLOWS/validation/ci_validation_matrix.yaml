@@ -1,0 +1,357 @@
+# CI/CD Validation Matrix Workflow
+# Comprehensive validation suite for code quality, tests, and security
+
+meta:
+  workflow_id: "ci-validation-matrix-v1"
+  version: "1.0.0"
+  purpose: "Run comprehensive validation before merge: linting, tests, security, coverage"
+  author: "Atomic Workflow System"
+  created: "2025-10-06"
+
+inputs:
+  - name: project_path
+    kind: file
+    description: "Path to project to validate"
+    required: true
+
+  - name: validation_gates
+    kind: table
+    description: "List of validation gates to run"
+    default: ["lint", "test", "security", "coverage"]
+
+  - name: fail_fast
+    kind: boolean
+    description: "Stop on first failure"
+    default: false
+
+outputs:
+  - name: validation_results
+    kind: json
+    description: "Results from all validation gates"
+
+  - name: overall_passed
+    kind: boolean
+    description: "Overall pass/fail status"
+
+atoms:
+  - atom_uid: "01JADW8T0000000000000000K1"
+    atom_key: "workflows/validation/v1/setup/all/001"
+    title: "Setup validation environment"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        cd "${inputs['project_path']}"
+
+        # Create validation results directory
+        mkdir -p .workflows/validation
+
+        # Detect project type
+        if [[ -f "package.json" ]]; then
+          PROJECT_TYPE="node"
+        elif [[ -f "pyproject.toml" ]] || [[ -f "setup.py" ]]; then
+          PROJECT_TYPE="python"
+        elif [[ -f "Cargo.toml" ]]; then
+          PROJECT_TYPE="rust"
+        elif [[ -f "go.mod" ]]; then
+          PROJECT_TYPE="go"
+        else
+          PROJECT_TYPE="unknown"
+        fi
+
+        outputs['project_type']=$PROJECT_TYPE
+
+        echo "Project type: $PROJECT_TYPE"
+    inputs: [project_path]
+    outputs: [project_type]
+
+  - atom_uid: "01JADW8T0000000000000000K2"
+    atom_key: "workflows/validation/v1/lint/all/002"
+    title: "Run linting checks"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set +e
+
+        cd "${inputs['project_path']}"
+
+        LINT_PASSED=true
+        LINT_OUTPUT=""
+
+        case "${inputs['project_type']}" in
+          python)
+            if command -v pylint &>/dev/null; then
+              LINT_OUTPUT=$(pylint **/*.py 2>&1)
+              [[ $? -eq 0 ]] || LINT_PASSED=false
+            fi
+            if command -v black &>/dev/null; then
+              black --check . &>/dev/null || LINT_PASSED=false
+            fi
+            if command -v isort &>/dev/null; then
+              isort --check . &>/dev/null || LINT_PASSED=false
+            fi
+            ;;
+
+          node)
+            if command -v eslint &>/dev/null; then
+              LINT_OUTPUT=$(eslint . 2>&1)
+              [[ $? -eq 0 ]] || LINT_PASSED=false
+            fi
+            ;;
+
+          rust)
+            cargo fmt --check || LINT_PASSED=false
+            cargo clippy -- -D warnings || LINT_PASSED=false
+            ;;
+
+          go)
+            gofmt -l . | grep . && LINT_PASSED=false
+            go vet ./... || LINT_PASSED=false
+            ;;
+        esac
+
+        outputs['lint_passed']=$LINT_PASSED
+        outputs['lint_output']="$LINT_OUTPUT"
+
+        echo "Lint: $LINT_PASSED"
+    deps: ["01JADW8T0000000000000000K1"]
+    inputs: [project_path, project_type]
+    outputs: [lint_passed, lint_output]
+
+  - atom_uid: "01JADW8T0000000000000000K3"
+    atom_key: "workflows/validation/v1/test/all/003"
+    title: "Run test suite"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set +e
+
+        cd "${inputs['project_path']}"
+
+        TEST_PASSED=true
+        TEST_OUTPUT=""
+
+        case "${inputs['project_type']}" in
+          python)
+            if [[ -f "pytest.ini" ]] || [[ -d "tests" ]]; then
+              TEST_OUTPUT=$(pytest -v --tb=short 2>&1)
+              [[ $? -eq 0 ]] || TEST_PASSED=false
+            fi
+            ;;
+
+          node)
+            if [[ -f "package.json" ]]; then
+              TEST_OUTPUT=$(npm test 2>&1)
+              [[ $? -eq 0 ]] || TEST_PASSED=false
+            fi
+            ;;
+
+          rust)
+            TEST_OUTPUT=$(cargo test 2>&1)
+            [[ $? -eq 0 ]] || TEST_PASSED=false
+            ;;
+
+          go)
+            TEST_OUTPUT=$(go test ./... -v 2>&1)
+            [[ $? -eq 0 ]] || TEST_PASSED=false
+            ;;
+        esac
+
+        outputs['test_passed']=$TEST_PASSED
+        outputs['test_output']="$TEST_OUTPUT"
+
+        echo "Tests: $TEST_PASSED"
+    deps: ["01JADW8T0000000000000000K2"]
+    inputs: [project_path, project_type]
+    outputs: [test_passed, test_output]
+
+  - atom_uid: "01JADW8T0000000000000000K4"
+    atom_key: "workflows/validation/v1/security/all/004"
+    title: "Run security scans"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set +e
+
+        cd "${inputs['project_path']}"
+
+        SECURITY_PASSED=true
+        SECURITY_ISSUES=0
+
+        case "${inputs['project_type']}" in
+          python)
+            if command -v bandit &>/dev/null; then
+              bandit -r . -f json -o .workflows/validation/bandit.json || true
+              SECURITY_ISSUES=$(jq '.results | length' .workflows/validation/bandit.json)
+              [[ $SECURITY_ISSUES -eq 0 ]] || SECURITY_PASSED=false
+            fi
+            if command -v safety &>/dev/null; then
+              safety check || SECURITY_PASSED=false
+            fi
+            ;;
+
+          node)
+            npm audit --audit-level=moderate || SECURITY_PASSED=false
+            ;;
+
+          rust)
+            cargo audit || SECURITY_PASSED=false
+            ;;
+
+          go)
+            if command -v gosec &>/dev/null; then
+              gosec ./... || SECURITY_PASSED=false
+            fi
+            ;;
+        esac
+
+        outputs['security_passed']=$SECURITY_PASSED
+        outputs['security_issues']=$SECURITY_ISSUES
+
+        echo "Security: $SECURITY_PASSED ($SECURITY_ISSUES issues)"
+    deps: ["01JADW8T0000000000000000K3"]
+    inputs: [project_path, project_type]
+    outputs: [security_passed, security_issues]
+
+  - atom_uid: "01JADW8T0000000000000000K5"
+    atom_key: "workflows/validation/v1/coverage/all/005"
+    title: "Check test coverage"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set +e
+
+        cd "${inputs['project_path']}"
+
+        COVERAGE_PASSED=true
+        COVERAGE_PCT=0
+
+        case "${inputs['project_type']}" in
+          python)
+            if command -v pytest &>/dev/null; then
+              pytest --cov=. --cov-report=json --cov-report=term
+              COVERAGE_PCT=$(jq '.totals.percent_covered' coverage.json 2>/dev/null || echo "0")
+              [[ $(echo "$COVERAGE_PCT >= 80" | bc) -eq 1 ]] || COVERAGE_PASSED=false
+            fi
+            ;;
+
+          node)
+            if command -v nyc &>/dev/null; then
+              nyc --reporter=json npm test
+              COVERAGE_PCT=$(jq '.total.lines.pct' coverage/coverage-summary.json 2>/dev/null || echo "0")
+              [[ $(echo "$COVERAGE_PCT >= 80" | bc) -eq 1 ]] || COVERAGE_PASSED=false
+            fi
+            ;;
+
+          rust)
+            if command -v cargo-tarpaulin &>/dev/null; then
+              cargo tarpaulin --out Json
+              COVERAGE_PCT=$(jq '.coverage' tarpaulin-report.json 2>/dev/null || echo "0")
+              [[ $(echo "$COVERAGE_PCT >= 80" | bc) -eq 1 ]] || COVERAGE_PASSED=false
+            fi
+            ;;
+
+          go)
+            go test -coverprofile=coverage.out ./...
+            COVERAGE_PCT=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+            [[ $(echo "$COVERAGE_PCT >= 80" | bc) -eq 1 ]] || COVERAGE_PASSED=false
+            ;;
+        esac
+
+        outputs['coverage_passed']=$COVERAGE_PASSED
+        outputs['coverage_pct']=$COVERAGE_PCT
+
+        echo "Coverage: $COVERAGE_PCT% (passed: $COVERAGE_PASSED)"
+    deps: ["01JADW8T0000000000000000K4"]
+    inputs: [project_path, project_type]
+    outputs: [coverage_passed, coverage_pct]
+
+  - atom_uid: "01JADW8T0000000000000000K6"
+    atom_key: "workflows/validation/v1/report/all/006"
+    title: "Generate validation report"
+    runtime:
+      language: python
+      entrypoint: |
+        import json
+        from datetime import datetime
+
+        gates = {
+          'lint': {
+            'passed': inputs['lint_passed'],
+            'output': inputs.get('lint_output', '')
+          },
+          'test': {
+            'passed': inputs['test_passed'],
+            'output': inputs.get('test_output', '')
+          },
+          'security': {
+            'passed': inputs['security_passed'],
+            'issues': inputs['security_issues']
+          },
+          'coverage': {
+            'passed': inputs['coverage_passed'],
+            'percentage': inputs['coverage_pct']
+          }
+        }
+
+        overall = all(g['passed'] for g in gates.values())
+
+        report = {
+          'project_type': inputs['project_type'],
+          'timestamp': datetime.now().isoformat(),
+          'gates': gates,
+          'overall_passed': overall,
+          'summary': {
+            'total_gates': len(gates),
+            'passed_gates': sum(1 for g in gates.values() if g['passed']),
+            'failed_gates': sum(1 for g in gates.values() if not g['passed'])
+          }
+        }
+
+        with open(f"{inputs['project_path']}/.workflows/validation/report.json", 'w') as f:
+          json.dump(report, f, indent=2)
+
+        outputs['validation_results'] = report
+        outputs['overall_passed'] = overall
+
+        # Print summary
+        print("\n=== Validation Summary ===")
+        for gate, result in gates.items():
+          status = "✅ PASS" if result['passed'] else "❌ FAIL"
+          print(f"{gate.upper()}: {status}")
+        print(f"\nOverall: {'✅ PASSED' if overall else '❌ FAILED'}")
+    deps: ["01JADW8T0000000000000000K5"]
+    inputs: [project_path, project_type, lint_passed, lint_output, test_passed,
+             test_output, security_passed, security_issues, coverage_passed, coverage_pct]
+    outputs: [validation_results, overall_passed]
+
+execution:
+  mode: sequential
+  parallelization:
+    # Atoms K2-K5 can run in parallel
+    enabled: true
+    parallel_atoms: ["01JADW8T0000000000000000K2", "01JADW8T0000000000000000K3",
+                     "01JADW8T0000000000000000K4", "01JADW8T0000000000000000K5"]
+
+observability:
+  metrics:
+    - validations_total
+    - validation_pass_rate
+    - average_validation_time
+    - security_issues_found
+
+examples:
+  - name: "Full validation"
+    command: |
+      ./ci_validation_matrix.sh --project-path /path/to/project
+
+  - name: "Quick validation (lint + tests only)"
+    command: |
+      ./ci_validation_matrix.sh --project-path /path/to/project \
+        --validation-gates lint,test

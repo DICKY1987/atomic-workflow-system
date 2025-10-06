@@ -1,0 +1,405 @@
+name: Claude Orchestrator
+
+on:
+  workflow_dispatch:
+    inputs:
+      workflow_name:
+        description: 'Workflow to execute'
+        required: true
+        type: choice
+        options:
+          - 'GITHUB_REPO_ANALYSIS'
+          - 'GITHUB_ISSUE_AUTOMATION'
+          - 'GITHUB_PR_REVIEW'
+          - 'GITHUB_RELEASE_MANAGEMENT'
+        default: 'GITHUB_REPO_ANALYSIS'
+      repository:
+        description: 'Target repository (owner/repo)'
+        required: false
+        default: 'auto-detect'
+      dry_run:
+        description: 'Dry run mode'
+        required: false
+        default: true
+        type: boolean
+      create_artifacts:
+        description: 'Create GitHub artifacts (issues, PRs)'
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    # Run repository analysis weekly on Sunday at 6 AM UTC
+    - cron: '0 6 * * 0'
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: claude-orchestrator-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONPATH: src
+  SIMPLIFIED_MAX_TOKENS: 8000
+  SIMPLIFIED_COST_LIMIT_USD: "1.50"
+  SIMPLIFIED_AI_FALLBACK_ONLY: "true"
+
+jobs:
+  detect-workflow:
+    name: Detect Workflow to Run
+    runs-on: ubuntu-latest
+    outputs:
+      workflow: ${{ steps.detect.outputs.workflow }}
+      should_run: ${{ steps.detect.outputs.should_run }}
+      repository: ${{ steps.detect.outputs.repository }}
+    steps:
+      - name: Detect workflow based on trigger
+        id: detect
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "workflow=${{ inputs.workflow_name }}" >> $GITHUB_OUTPUT
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "repository=${{ inputs.repository }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "workflow=GITHUB_REPO_ANALYSIS" >> $GITHUB_OUTPUT
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "repository=auto-detect" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "issue_comment" ]; then
+            comment="${{ github.event.comment.body }}"
+            if echo "$comment" | grep -q "/claude analyze"; then
+              echo "workflow=GITHUB_REPO_ANALYSIS" >> $GITHUB_OUTPUT
+              echo "should_run=true" >> $GITHUB_OUTPUT
+            elif echo "$comment" | grep -q "/claude triage"; then
+              echo "workflow=GITHUB_ISSUE_AUTOMATION" >> $GITHUB_OUTPUT
+              echo "should_run=true" >> $GITHUB_OUTPUT
+            elif echo "$comment" | grep -q "/claude review"; then
+              echo "workflow=GITHUB_PR_REVIEW" >> $GITHUB_OUTPUT
+              echo "should_run=true" >> $GITHUB_OUTPUT
+            elif echo "$comment" | grep -q "/claude release"; then
+              echo "workflow=GITHUB_RELEASE_MANAGEMENT" >> $GITHUB_OUTPUT
+              echo "should_run=true" >> $GITHUB_OUTPUT
+            elif echo "$comment" | grep -q "/claude simple-edit\|/claude quick-fix\|/claude triage-only"; then
+              # Map simplified commands to existing automation with reduced budgets
+              echo "workflow=GITHUB_ISSUE_AUTOMATION" >> $GITHUB_OUTPUT
+              echo "should_run=true" >> $GITHUB_OUTPUT
+            else
+              echo "should_run=false" >> $GITHUB_OUTPUT
+            fi
+            echo "repository=auto-detect" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+
+  validate-environment:
+    name: Validate Claude Environment
+    runs-on: ubuntu-latest
+    needs: detect-workflow
+    if: needs.detect-workflow.outputs.should_run == 'true'
+    outputs:
+      claude_available: ${{ steps.validate.outputs.claude_available }}
+      github_available: ${{ steps.validate.outputs.github_available }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install CLI Orchestrator
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[ai]
+
+      - name: Validate environment
+        id: validate
+        env:
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python -c "
+          import sys
+          import os
+          sys.path.insert(0, 'src')
+
+          # Check Claude availability
+          claude_available = bool(os.environ.get('CLAUDE_API_KEY'))
+          print(f'Claude API available: {claude_available}')
+
+          # Check GitHub configuration
+          from cli_multi_rapid.config.github_config import validate_github_setup
+          github_config = validate_github_setup()
+          github_available = github_config.get('status') in ['configured', 'partially_configured']
+          print(f'GitHub integration available: {github_available}')
+
+          print(f'claude_available={claude_available}' + chr(10), file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+          print(f'github_available={github_available}' + chr(10), file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+
+          if not github_available:
+              print('⚠️ GitHub integration not fully configured')
+              for issue in github_config.get('issues', []):
+                  print(f'  - {issue}')
+          "
+
+  execute-workflow:
+    name: Execute Claude Workflow
+    runs-on: ubuntu-latest
+    needs: [detect-workflow, validate-environment]
+    if: needs.detect-workflow.outputs.should_run == 'true' && needs.validate-environment.outputs.github_available == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install CLI Orchestrator
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[ai]
+
+      - name: Prepare workflow execution
+        run: |
+          mkdir -p artifacts logs cost
+
+          # Create execution config
+          cat > execution-config.json << EOF
+          {
+            "workflow": "${{ needs.detect-workflow.outputs.workflow }}",
+            "repository": "${{ needs.detect-workflow.outputs.repository }}",
+            "dry_run": ${{ inputs.dry_run || 'true' }},
+            "create_artifacts": ${{ inputs.create_artifacts || 'false' }},
+            "triggered_by": "${{ github.event_name }}",
+            "actor": "${{ github.actor }}",
+            "timestamp": "$(date -Iseconds)"
+          }
+          EOF
+
+      - name: Execute Repository Analysis
+        if: needs.detect-workflow.outputs.workflow == 'GITHUB_REPO_ANALYSIS'
+        env:
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔍 Running Repository Analysis..."
+
+          python -m cli_multi_rapid.cli run .ai/workflows/GITHUB_REPO_ANALYSIS.yaml \
+            --repo "${{ github.repository }}" \
+            ${{ inputs.dry_run == true && '--dry-run' || '' }}
+
+      - name: Execute Issue Automation
+        if: needs.detect-workflow.outputs.workflow == 'GITHUB_ISSUE_AUTOMATION'
+        env:
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🏷️ Running Issue Automation..."
+
+          python -m cli_multi_rapid.cli run .ai/workflows/GITHUB_ISSUE_AUTOMATION.yaml \
+            --repo "${{ github.repository }}" \
+            --state "open" \
+            --create-report-issue "${{ inputs.create_artifacts }}" \
+            ${{ inputs.dry_run == true && '--dry-run' || '' }}
+
+      - name: Execute PR Review
+        if: needs.detect-workflow.outputs.workflow == 'GITHUB_PR_REVIEW'
+        env:
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔍 Running PR Review Analysis..."
+
+          python -m cli_multi_rapid.cli run .ai/workflows/GITHUB_PR_REVIEW.yaml \
+            --repo "${{ github.repository }}" \
+            --create-summary-issue "${{ inputs.create_artifacts }}" \
+            ${{ inputs.dry_run == true && '--dry-run' || '' }}
+
+      - name: Execute Release Management
+        if: needs.detect-workflow.outputs.workflow == 'GITHUB_RELEASE_MANAGEMENT'
+        env:
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🚀 Running Release Management..."
+
+          python -m cli_multi_rapid.cli run .ai/workflows/GITHUB_RELEASE_MANAGEMENT.yaml \
+            --repo "${{ github.repository }}" \
+            --release-type "auto" \
+            --create-release-issue "${{ inputs.create_artifacts }}" \
+            ${{ inputs.dry_run == true && '--dry-run' || '' }}
+
+      - name: Generate execution summary
+        if: always()
+        run: |
+          python -c "
+          import json
+          import os
+          import glob
+          from datetime import datetime
+
+          # Load execution config
+          with open('execution-config.json', 'r') as f:
+              config = json.load(f)
+
+          # Gather artifacts
+          artifact_files = glob.glob('artifacts/*.json') + glob.glob('artifacts/*.md')
+          log_files = glob.glob('logs/*.jsonl')
+          cost_files = glob.glob('cost/*.json')
+
+          summary = {
+              'execution': config,
+              'results': {
+                  'artifacts_created': len(artifact_files),
+                  'logs_generated': len(log_files),
+                  'cost_reports': len(cost_files),
+                  'artifacts': [os.path.basename(f) for f in artifact_files],
+                  'status': 'completed'
+              },
+              'completed_at': datetime.utcnow().isoformat()
+          }
+
+          with open('execution-summary.json', 'w') as f:
+              json.dump(summary, f, indent=2)
+
+          print('📊 Execution Summary:')
+          print(f'  Workflow: {config[\"workflow\"]}')
+          print(f'  Repository: {config[\"repository\"]}')
+          print(f'  Dry Run: {config[\"dry_run\"]}')
+          print(f'  Artifacts: {len(artifact_files)}')
+          print(f'  Status: Completed')
+          "
+
+      - name: Upload execution artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-execution-${{ needs.detect-workflow.outputs.workflow }}-${{ github.run_number }}
+          path: |
+            execution-summary.json
+            execution-config.json
+            artifacts/
+            logs/
+            cost/
+          retention-days: 30
+
+      - name: Comment on triggering issue (if applicable)
+        if: github.event_name == 'issue_comment' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            let summary = {};
+            try {
+              summary = JSON.parse(fs.readFileSync('execution-summary.json', 'utf8'));
+            } catch (e) {
+              summary = { results: { status: 'failed', artifacts_created: 0 } };
+            }
+
+            const workflow = '${{ needs.detect-workflow.outputs.workflow }}';
+            const dryRun = ${{ inputs.dry_run || 'true' }};
+
+            let comment = `## 🤖 Claude Orchestrator Results\n\n`;
+            comment += `**Workflow:** ${workflow}\n`;
+            comment += `**Mode:** ${dryRun ? 'Dry Run' : 'Live Execution'}\n`;
+            comment += `**Status:** ${summary.results?.status || 'unknown'}\n`;
+            comment += `**Artifacts Created:** ${summary.results?.artifacts_created || 0}\n\n`;
+
+            if (summary.results?.artifacts?.length > 0) {
+              comment += `**Generated Artifacts:**\n`;
+              summary.results.artifacts.forEach(artifact => {
+                comment += `- ${artifact}\n`;
+              });
+              comment += '\n';
+            }
+
+            comment += `**Run Details:** [View workflow run](${context.payload.repository.html_url}/actions/runs/${context.runId})\n\n`;
+            comment += `---\n*Triggered by comment in issue #${{ github.event.issue.number }}*`;
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+  cost-tracking:
+    name: Track Execution Costs
+    runs-on: ubuntu-latest
+    needs: [detect-workflow, execute-workflow]
+    if: always() && needs.detect-workflow.outputs.should_run == 'true'
+    steps:
+      - name: Download execution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: claude-execution-${{ needs.detect-workflow.outputs.workflow }}-${{ github.run_number }}
+          path: ./execution-results/
+
+      - name: Generate cost report
+        run: |
+          python -c "
+          import json
+          import glob
+          import os
+          from datetime import datetime
+
+          # Aggregate cost data
+          cost_files = glob.glob('execution-results/cost/*.json')
+          total_tokens = 0
+          cost_breakdown = {}
+
+          for cost_file in cost_files:
+              try:
+                  with open(cost_file, 'r') as f:
+                      cost_data = json.load(f)
+                      tokens = cost_data.get('tokens_used', 0)
+                      total_tokens += tokens
+
+                      step = cost_data.get('step_name', 'unknown')
+                      cost_breakdown[step] = cost_breakdown.get(step, 0) + tokens
+              except Exception as e:
+                  print(f'Error reading cost file {cost_file}: {e}')
+
+          # Generate cost report
+          cost_report = {
+              'workflow': '${{ needs.detect-workflow.outputs.workflow }}',
+              'execution_id': '${{ github.run_number }}',
+              'timestamp': datetime.utcnow().isoformat(),
+              'total_tokens': total_tokens,
+              'estimated_cost_usd': round(total_tokens * 0.00001, 4),  # Rough estimate
+              'breakdown': cost_breakdown,
+              'repository': '${{ github.repository }}',
+              'dry_run': ${{ inputs.dry_run || 'true' }}
+          }
+
+          with open('cost-report.json', 'w') as f:
+              json.dump(cost_report, f, indent=2)
+
+          print(f'💰 Cost Report Generated:')
+          print(f'  Total Tokens: {total_tokens:,}')
+          print(f'  Estimated Cost: ${cost_report[\"estimated_cost_usd\"]}')
+          print(f'  Steps: {len(cost_breakdown)}')
+          "
+
+      - name: Upload cost report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cost-report-${{ github.run_number }}
+          path: cost-report.json
+          retention-days: 90
+
+  notify-completion:
+    name: Notify Completion
+    runs-on: ubuntu-latest
+    needs: [detect-workflow, execute-workflow, cost-tracking]
+    if: always() && needs.detect-workflow.outputs.should_run == 'true'
+    steps:
+      - name: Generate notification
+        run: |
+          echo "🎉 Claude Orchestrator execution completed!"
+          echo "Workflow: ${{ needs.detect-workflow.outputs.workflow }}"
+          echo "Repository: ${{ github.repository }}"
+          echo "Triggered by: ${{ github.event_name }}"
+          echo "Status: ${{ needs.execute-workflow.result }}"

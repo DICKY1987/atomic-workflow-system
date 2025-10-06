@@ -1,0 +1,374 @@
+# Tool-Agnostic Slash Command Library
+# Reusable command patterns that work across all AI coding tools
+
+meta:
+  library_id: "slash-command-library-v1"
+  version: "1.0.0"
+  purpose: "Universal slash commands for common workflows across AI tools"
+  author: "Atomic Workflow System"
+  created: "2025-10-06"
+  compatible_tools:
+    - claude_code
+    - aider
+    - gemini_cli
+    - copilot_chat
+    - continue_vscode
+
+commands:
+  - command_id: "init-project"
+    slash: "/init-project"
+    summary: "Initialize new project with all configurations"
+    description: |
+      Sets up a new project with:
+      - Git repository initialization
+      - CI/CD workflows
+      - Pre-commit hooks
+      - Linting and formatting configs
+      - Testing framework
+      - Documentation structure
+    workflow: "../core/init_project_workflow.yaml"
+    args:
+      - name: project_name
+        type: string
+        required: true
+      - name: project_type
+        type: string
+        options: ["python", "node", "rust", "go"]
+        required: true
+      - name: template
+        type: string
+        default: "standard"
+    implementation:
+      claude_code: |
+        # .claude/commands/init-project.md
+        ---
+        description: Initialize new project with all configurations
+        args:
+          - project_name
+          - project_type
+        ---
+
+        Initialize a new {{project_type}} project named "{{project_name}}" with:
+        - Git repository
+        - CI/CD workflows (.github/workflows/)
+        - Pre-commit hooks
+        - Linting configs
+        - Testing framework
+        - README.md and documentation structure
+
+      aider: |
+        # .aider/commands/init-project.toml
+        [command.init-project]
+        description = "Initialize new project"
+        script = """
+        # Run init-project workflow
+        python workflows/init_project.py --name {{project_name}} --type {{project_type}}
+        """
+
+      gemini_cli: |
+        # .gemini/commands/init-project.toml
+        [command.init-project]
+        description = "Initialize new project with configs"
+        prompt = "Set up {{project_type}} project named {{project_name}} with Git, CI/CD, and testing"
+
+  - command_id: "safe-edit"
+    slash: "/safe-edit"
+    summary: "Edit files with automatic Git checkpointing"
+    description: |
+      Wraps edit operations with:
+      - Pre-edit checkpoint
+      - Validation after edit
+      - Auto-commit on success
+      - Rollback on failure
+    workflow: "../core/safe_edit_workflow.yaml"
+    args:
+      - name: file_pattern
+        type: string
+        required: true
+      - name: task_description
+        type: string
+        required: true
+    implementation:
+      claude_code: |
+        ---
+        description: Edit with automatic checkpointing
+        args:
+          - file_pattern
+          - task_description
+        ---
+
+        1. Create checkpoint before editing {{file_pattern}}
+        2. Make the following changes: {{task_description}}
+        3. Validate the changes (lint + quick tests)
+        4. If validation passes: commit with message "feat: {{task_description}}"
+        5. If validation fails: rollback to checkpoint
+
+      aider: |
+        [command.safe-edit]
+        description = "Edit with Git safety"
+        pre_hook = "git add -A && git commit -m 'checkpoint: before edit'"
+        post_hook = "pytest --maxfail=1 && git commit -am 'feat: {{task_description}}' || git reset --hard HEAD~1"
+
+  - command_id: "parallel-work"
+    slash: "/parallel-work"
+    summary: "Execute multiple tasks in parallel using worktrees"
+    description: |
+      Splits work across multiple agents using Git worktrees:
+      - Creates isolated worktree per task
+      - Executes tasks in parallel
+      - Merges results deterministically
+    workflow: "../core/multi_agent_pipeline.yaml"
+    args:
+      - name: tasks
+        type: array
+        description: "List of task descriptions"
+        required: true
+    implementation:
+      claude_code: |
+        ---
+        description: Parallel execution with worktrees
+        args:
+          - tasks
+        ---
+
+        Execute these tasks in parallel using the multi-agent pipeline:
+        {{#each tasks}}
+        - Task {{@index}}: {{this}}
+        {{/each}}
+
+        Use Git worktrees for isolation and merge deterministically.
+
+  - command_id: "validate-all"
+    slash: "/validate-all"
+    summary: "Run full validation suite"
+    description: |
+      Comprehensive validation:
+      - Linting (code quality)
+      - Tests (unit + integration)
+      - Security scans
+      - Coverage checks
+      - Type checking
+    workflow: "../validation/ci_validation_matrix.yaml"
+    args: []
+    implementation:
+      claude_code: |
+        ---
+        description: Full validation suite
+        ---
+
+        Run the complete CI validation matrix:
+        1. Lint checks (black, pylint, isort)
+        2. Test suite (pytest with coverage)
+        3. Security scans (bandit, safety)
+        4. Coverage threshold (>80%)
+        5. Type checking (mypy)
+
+        Generate validation report at .workflows/validation/report.json
+
+      aider: |
+        [command.validate-all]
+        description = "Full validation"
+        script = "python workflows/validation/ci_validation_matrix.py"
+
+  - command_id: "merge-safe"
+    slash: "/merge-safe"
+    summary: "Safely merge branch with validation"
+    description: |
+      Safe merge workflow:
+      - Status check before merge
+      - Conflict detection
+      - Auto-resolution where possible
+      - Full validation on merged state
+      - Rollback on failure
+    workflow: "../github/gh_merge_workstreams.yaml"
+    args:
+      - name: source_branch
+        type: string
+        required: true
+      - name: target_branch
+        type: string
+        default: "main"
+    implementation:
+      claude_code: |
+        ---
+        description: Safe merge with validation
+        args:
+          - source_branch
+          - target_branch
+        ---
+
+        Safely merge {{source_branch}} into {{target_branch}}:
+        1. Check status of both branches
+        2. Detect potential conflicts
+        3. Create merge preview
+        4. Execute merge with auto-conflict resolution
+        5. Run validation suite
+        6. If validation passes: push merge
+        7. If validation fails: rollback
+
+  - command_id: "create-pr"
+    slash: "/create-pr"
+    summary: "Create PR with comprehensive metadata"
+    description: |
+      Automated PR creation:
+      - Generate title from commits
+      - Comprehensive description
+      - Attach test reports
+      - Request reviewers
+      - Enable auto-merge
+    workflow: "../github/gh_create_pr.yaml"
+    args:
+      - name: reviewers
+        type: array
+        required: false
+      - name: auto_merge
+        type: boolean
+        default: false
+    implementation:
+      claude_code: |
+        ---
+        description: Create PR with metadata
+        args:
+          - reviewers
+          - auto_merge
+        ---
+
+        Create pull request for current branch:
+        1. Generate title from branch name and commits
+        2. Create comprehensive description with:
+           - Summary of changes
+           - Files modified
+           - Test results
+           - Validation status
+        3. Request reviews from: {{reviewers}}
+        4. {{#if auto_merge}}Enable auto-merge when checks pass{{/if}}
+
+  - command_id: "rollback"
+    slash: "/rollback"
+    summary: "Safe rollback to previous state"
+    description: |
+      Intelligent rollback:
+      - Find rollback target (checkpoint/commit/time)
+      - Preserve history (revert vs reset)
+      - Validate rolled-back state
+      - Create rollback PR for protected branches
+    workflow: "../github/gh_rollback.yaml"
+    args:
+      - name: target
+        type: string
+        description: "Checkpoint ID, commit SHA, or relative time"
+        required: true
+      - name: reason
+        type: string
+        required: true
+    implementation:
+      claude_code: |
+        ---
+        description: Rollback to previous state
+        args:
+          - target
+          - reason
+        ---
+
+        Rollback to {{target}}:
+        Reason: {{reason}}
+
+        1. Resolve target to commit SHA
+        2. Create rollback branch
+        3. Use revert (preserves history) or reset based on branch
+        4. Validate rolled-back state
+        5. Push rollback branch
+        6. For main/protected: create PR
+
+  - command_id: "status"
+    slash: "/status"
+    summary: "Comprehensive repository status"
+    description: |
+      Full status check:
+      - Working tree state
+      - Branch sync status
+      - PR status and checks
+      - CI/CD status
+      - Mergeable indicator
+    workflow: "../github/gh_status_check.yaml"
+    args:
+      - name: verbose
+        type: boolean
+        default: false
+    implementation:
+      claude_code: |
+        ---
+        description: Repository status check
+        args:
+          - verbose
+        ---
+
+        Check comprehensive status:
+        1. Local workspace state (clean/dirty, commits ahead/behind)
+        2. Remote branch status
+        3. Pull request status (if exists)
+        4. CI/CD workflow runs
+        5. Mergeable status
+
+        {{#if verbose}}Include detailed output{{/if}}
+
+usage_examples:
+  init_project:
+    claude: |
+      /init-project project_name="my-api" project_type="python"
+
+    aider: |
+      /init-project my-api python
+
+  safe_edit:
+    claude: |
+      /safe-edit file_pattern="src/**/*.py" task_description="Add type hints to all functions"
+
+  parallel_work:
+    claude: |
+      /parallel-work tasks='["Refactor auth", "Update docs", "Add tests"]'
+
+  validate_all:
+    claude: |
+      /validate-all
+
+  merge_safe:
+    claude: |
+      /merge-safe source_branch="feature/new-api" target_branch="main"
+
+  create_pr:
+    claude: |
+      /create-pr reviewers='["alice", "bob"]' auto_merge=true
+
+  rollback:
+    claude: |
+      /rollback target="checkpoint:abc123" reason="Failed integration tests"
+
+  status:
+    claude: |
+      /status verbose=true
+
+installation:
+  claude_code:
+    directory: ".claude/commands/"
+    format: markdown
+    steps:
+      - "Create .claude/commands/ directory"
+      - "Copy command .md files from implementations"
+      - "Commands auto-loaded by Claude Code"
+
+  aider:
+    directory: ".aider/commands/"
+    format: toml
+    steps:
+      - "Create .aider/commands/ directory"
+      - "Copy .toml files"
+      - "Restart aider to load commands"
+
+  gemini_cli:
+    directory: ".gemini/commands/"
+    format: toml
+    steps:
+      - "Create .gemini/commands/ directory"
+      - "Copy .toml files"
+      - "Run: gemini commands reload"

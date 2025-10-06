@@ -1,0 +1,19 @@
+workflow:
+  ns: DOC
+  wf: reorder_atoms_without_rewriting_entire_workflows
+  wfv: v1
+  title: "Reorder atoms without rewriting entire workflows"
+  purpose: >
+    Provides guidance on modifying atomic workflows without wholesale rewrites.  It details how to
+    insert new tasks, remove obsolete ones and reorder existing atoms while leveraging the Two‑ID model.
+    Strategies such as gap numbering, suffixing, updating dependencies and changelog entries are
+    explained to maintain stability and backward compatibility.
+  atoms:
+    - atom_uid: 01DOC015ABCDEFGHIJKLMNOPQR
+      atom_key: DOC/reorder_atoms_without_rewriting_entire_workflows/v1/doc/all/001
+      title: "Reorder atoms guidance documentation"
+      description: >
+        Summarises the rules for safely reordering atoms.  It mirrors the content of the add/remove
+        document but focuses on reordering strategies and the importance of preserving atom_uids while
+        evolving atom_keys.  This atom can be referenced by teams updating their workflow layouts.
+      source_file: "ATOMIZED_PROCESSES/reorder atoms without rewriting entire workflows.md"

@@ -1,0 +1,35 @@
+workflow:
+  ns: GHCI
+  wf: SECURITY_SCAN
+  wfv: v1
+  title: "Secrets & SAST scan"
+  trigger:
+    on: [push, pull_request]
+  purpose: "Scan code for secrets and common vulnerabilities; upload SARIF to code scanning."
+  invariants:
+    - "No secrets in diff; fail build on high severity."
+  registry_generated: true
+
+atoms:
+  - atom_uid: 01JAX0A0SECSCAN001
+    atom_key: GHCI/SECURITY_SCAN/v1/PH1/CHECKOUT/001
+    title: Checkout
+    deps: []
+    commands:
+      - gha: "actions/checkout@v4"
+
+  - atom_uid: 01JAX0A0SECSCAN002
+    atom_key: GHCI/SECURITY_SCAN/v1/PH2/GITLEAKS/002
+    title: Run gitleaks
+    deps: [GHCI/SECURITY_SCAN/v1/PH1/CHECKOUT/001]
+    commands:
+      - gha: "gitleaks/gitleaks-action@v2"
+
+  - atom_uid: 01JAX0A0SECSCAN003
+    atom_key: GHCI/SECURITY_SCAN/v1/PH3/SARIF/003
+    title: Upload SARIF
+    deps: [GHCI/SECURITY_SCAN/v1/PH2/GITLEAKS/002]
+    commands:
+      - gha: "github/codeql-action/upload-sarif@v3"
+    acceptance_criteria:
+      - "SARIF uploaded"

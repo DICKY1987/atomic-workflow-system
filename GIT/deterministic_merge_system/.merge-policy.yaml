@@ -1,0 +1,61 @@
+version: 1
+default_strategy: "recursive"
+weighted_resolution:
+  timestamp: 3
+  author_priority: 5
+  branch_priority: 4
+  line_age: 1
+
+branch_priority:
+  main: 100
+  "release/*": 90
+  dev: 80
+  "feature/*": 70
+  "workstream/*": 60
+
+path_strategies:
+  - pattern: "package-lock.json"
+    strategy: "theirs"
+  - pattern: "poetry.lock"
+    strategy: "theirs"
+  - pattern: "**/*.png"
+    strategy: "binary"
+  - pattern: "CHANGELOG.md"
+    strategy: "union"
+  - pattern: "**/*.json"
+    strategy: "json-struct"
+  - pattern: "**/*.{yml,yaml}"
+    strategy: "yaml-struct"
+  - pattern: "Dockerfile"
+    strategy: "manual"
+  - pattern: "requirements.txt"
+    strategy: "theirs"
+    security_check: true
+
+author_priority:
+  - "you@company.com"
+  - "ci-bot@company.com"
+
+text_norm:
+  eol: "lf"
+  trim_trailing_whitespace: true
+  final_newline: true
+
+verification:
+  json_schemas:
+    - path: "config/**/*.json"
+      schema: "schemas/config.schema.json"
+  static_analysis:
+    - "ruff check --select=F,E9"
+    - "mypy --strict"
+  integration_tests:
+    - "just test:integration"
+  security_checks:
+    - "npm audit --audit-level=high || exit 1"
+
+workstream_fences:
+  "workstream/json-normalizer":
+    allowed_paths:
+      - "src/json/**"
+      - "tests/json/**"
+    cross_fence_conflicts: "quarantine"
