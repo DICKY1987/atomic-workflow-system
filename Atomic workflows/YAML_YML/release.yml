@@ -1,0 +1,191 @@
+name: Multi-Language Release Pipeline
+
+on:
+  push:
+    tags: ['v*']
+  release:
+    types: [published]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-release:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
+      is_prerelease: ${{ steps.extract.outputs.is_prerelease }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Extract version info
+      id: extract
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+        if [[ "$VERSION" == *"alpha"* ]] || [[ "$VERSION" == *"beta"* ]] || [[ "$VERSION" == *"rc"* ]]; then
+          echo "is_prerelease=true" >> $GITHUB_OUTPUT
+        else
+          echo "is_prerelease=false" >> $GITHUB_OUTPUT
+        fi
+
+  build-python:
+    name: Build Python Package
+    runs-on: ubuntu-latest
+    needs: validate-release
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip build cyclonedx-bom
+
+    - name: Update version in pyproject.toml
+      run: |
+        sed -i 's/version = ".*"/version = "${{ needs.validate-release.outputs.version }}"/' pyproject.toml
+
+    - name: Build package and SBOM
+      run: |
+        python -m build
+        cyclonedx-bom -o sbom.json
+
+    - name: Upload Python artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: python-package
+        path: |
+          dist/
+          sbom.json
+
+  build-vscode-extension:
+    name: Build VS Code Extension
+    runs-on: ubuntu-latest
+    needs: validate-release
+
+    defaults:
+      run:
+        working-directory: ./vscode-extension
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js 18
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: vscode-extension/package-lock.json
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Update version in package.json
+      run: |
+        npm version ${{ needs.validate-release.outputs.version }} --no-git-tag-version
+
+    - name: Package extension
+      run: |
+        npm install -g @vscode/vsce
+        vsce package
+
+    - name: Upload VS Code extension artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: vscode-extension
+        path: vscode-extension/*.vsix
+
+  build-mql4:
+    name: Build MQL4 Components
+    runs-on: windows-latest
+    needs: validate-release
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Validate MQL4 files
+      shell: powershell
+      run: |
+        scripts/compile_mql4.ps1 -ValidateOnly
+
+    - name: Package MQL4 artifacts
+      shell: powershell
+      run: |
+        $version = "${{ needs.validate-release.outputs.version }}"
+        $outputPath = "mql4-package-$version"
+
+        New-Item -ItemType Directory -Path $outputPath -Force
+        if (Test-Path "P_mql4") {
+          Copy-Item -Path "P_mql4/*" -Destination $outputPath -Recurse -Force
+        }
+
+        @{
+          version = $version
+          build_date = Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ"
+        } | ConvertTo-Json | Out-File -FilePath "$outputPath/package-info.json" -Encoding UTF8
+
+        Compress-Archive -Path $outputPath -DestinationPath "mql4-package-$version.zip"
+
+    - name: Upload MQL4 artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: mql4-package
+        path: mql4-package-*.zip
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [validate-release, build-python, build-vscode-extension, build-mql4]
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: release-artifacts
+
+    - name: Create Release Notes
+      run: |
+        VERSION="${{ needs.validate-release.outputs.version }}"
+        cat > RELEASE_NOTES.md << EOF
+        # CLI Multi-Rapid v${VERSION}
+
+        Multi-language CLI orchestrator with Python backend, TypeScript VS Code extension, and MQL4 trading components.
+
+        ## Components
+        - **Python Package**: CLI orchestrator with adapter framework
+        - **VS Code Extension**: Real-time workflow cockpit
+        - **MQL4 Components**: Trading system helpers
+
+        ## Installation
+        \`\`\`bash
+        pip install cli-orchestrator==${VERSION}
+        \`\`\`
+
+        See artifacts below for VS Code extension (.vsix) and MQL4 components.
+        EOF
+
+    - name: Publish GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        body_path: RELEASE_NOTES.md
+        prerelease: ${{ needs.validate-release.outputs.is_prerelease }}
+        files: |
+          release-artifacts/python-package/*
+          release-artifacts/vscode-extension/*
+          release-artifacts/mql4-package/*
