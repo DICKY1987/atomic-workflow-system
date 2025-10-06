@@ -1,0 +1,55 @@
+name: Windows CI - Pester
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  pester:
+    name: Run Pester tests
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PowerShell and install Pester
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name 'PSGallery' -InstallationPolicy Trusted
+          try {
+            $module = Get-Module -ListAvailable -Name Pester | Sort-Object Version -Descending | Select-Object -First 1
+            if (-not $module -or $module.Version -lt [version]'5.4.0') {
+              Install-Module -Name Pester -MinimumVersion 5.4.0 -Scope CurrentUser -Force -ErrorAction Stop
+            }
+          } catch {
+            Write-Host "Falling back to forced install of Pester"
+            Install-Module -Name Pester -Scope CurrentUser -Force
+          }
+          Import-Module Pester -Force
+
+      - name: Run Pester and produce NUnit XML
+        id: pester
+        shell: pwsh
+        run: |
+          $config = New-PesterConfiguration
+          $config.Run.Path = '.'
+          $config.Output.Verbosity = 'Detailed'
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputFormat = 'NUnitXml'
+          $config.TestResult.OutputPath = 'TestResults.xml'
+          $config.Run.PassThru = $true
+
+          $result = Invoke-Pester -Configuration $config
+          Write-Host "Passed: $($result.PassedCount)  Failed: $($result.FailedCount)  Skipped: $($result.SkippedCount)"
+          if ($result.FailedCount -gt 0) { exit 1 }
+
+      - name: Upload Pester Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pester-results
+          path: TestResults.xml
+          if-no-files-found: warn
+

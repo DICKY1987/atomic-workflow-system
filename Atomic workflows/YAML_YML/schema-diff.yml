@@ -1,0 +1,23 @@
+name: schema-diff
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/schemas/**.json'
+      - 'scripts/schema_diff.py'
+
+jobs:
+  schema-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Run schema diff gate
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          python scripts/schema_diff.py
