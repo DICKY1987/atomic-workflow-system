@@ -121,41 +121,34 @@ def scan_file_patterns(content: str) -> Dict[str, Set[str]]:
     """
     patterns = {'inputs': set(), 'outputs': set()}
     
-    # Input patterns
+    # Input patterns - look for -Path parameter or direct string argument
     input_cmdlets = [
-        r'Get-Content\s+["\']?([^"\'\s]+)["\']?',
-        r'Import-\w+\s+["\']?([^"\'\s]+)["\']?',
-        r'Read-\w+\s+["\']?([^"\'\s]+)["\']?',
-        r'Test-Path\s+["\']?([^"\'\s]+)["\']?',
+        r'Get-Content\s+(?:-Path\s+)?["\']([^"\']+)["\']',
+        r'Import-\w+\s+(?:-Path\s+)?["\']([^"\']+)["\']',
+        r'Read-\w+\s+(?:-Path\s+)?["\']([^"\']+)["\']',
+        r'Test-Path\s+(?:-Path\s+)?["\']([^"\']+)["\']',
     ]
     
     for pattern in input_cmdlets:
         matches = re.findall(pattern, content, re.IGNORECASE)
         for match in matches:
-            # Clean up variable references and normalize paths
+            # Clean up and normalize paths
             if not match.startswith('$'):
-                patterns['inputs'].add(match.strip('"\''))
+                patterns['inputs'].add(match.strip())
     
     # Output patterns
     output_cmdlets = [
-        r'Set-Content\s+["\']?([^"\'\s]+)["\']?',
-        r'Export-\w+\s+["\']?([^"\'\s]+)["\']?',
-        r'Out-File\s+["\']?([^"\'\s]+)["\']?',
-        r'Write-\w+\s+["\']?([^"\'\s]+)["\']?.*-Path\s+["\']?([^"\'\s]+)["\']?',
+        r'Set-Content\s+(?:-Path\s+)?["\']([^"\']+)["\']',
+        r'Export-\w+\s+-Path\s+["\']([^"\']+)["\']',
+        r'Out-File\s+(?:-FilePath\s+)?["\']([^"\']+)["\']',
         r'>>\s*["\']?([^"\'\s]+)["\']?',  # Redirection operator
     ]
     
     for pattern in output_cmdlets:
         matches = re.findall(pattern, content, re.IGNORECASE)
         for match in matches:
-            # Handle tuples from patterns with multiple groups
-            if isinstance(match, tuple):
-                for m in match:
-                    if m and not m.startswith('$'):
-                        patterns['outputs'].add(m.strip('"\''))
-            else:
-                if not match.startswith('$'):
-                    patterns['outputs'].add(match.strip('"\''))
+            if not match.startswith('$'):
+                patterns['outputs'].add(match.strip())
     
     return patterns
 

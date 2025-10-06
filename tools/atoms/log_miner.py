@@ -25,34 +25,38 @@ import argparse
 log = structlog.get_logger()
 
 
-# Normalization patterns
+# Normalization patterns (order matters - more specific patterns first)
 NORMALIZATION_PATTERNS = [
-    # Timestamps
+    # IDs and hashes (before numbers to avoid partial matches)
+    (r'\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b', '<UUID>'),
+    (r'\b[0-9a-fA-F]{64}\b', '<SHA256>'),
+    (r'\b[0-9a-fA-F]{40}\b', '<SHA1>'),
+    (r'\b[0-9a-fA-F]{32}\b', '<MD5>'),
+    (r'\b[0-9A-HJKMNP-TV-Z]{26}\b', '<ULID>'),
+    
+    # Timestamps (before numbers)
     (r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?', '<TIMESTAMP>'),
     (r'\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}', '<TIMESTAMP>'),
-    (r'\d{10,13}', '<UNIX_TIMESTAMP>'),
     
-    # IDs and hashes
-    (r'\b[0-9a-fA-F]{32}\b', '<MD5>'),
-    (r'\b[0-9a-fA-F]{40}\b', '<SHA1>'),
-    (r'\b[0-9a-fA-F]{64}\b', '<SHA256>'),
-    (r'\b[0-9A-HJKMNP-TV-Z]{26}\b', '<ULID>'),
-    (r'\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b', '<UUID>'),
+    # IP addresses (before numbers)
+    (r'\b\d+\.\d+\.\d+\.\d+(?::\d+)?\b', '<IP_ADDRESS>'),
+    
+    # Durations and sizes (before numbers)
+    (r'\b\d+(?:\.\d+)?\s*(?:ms|sec|min|hr|KB|MB|GB|TB)\b', '<METRIC>'),
+    
+    # Process/Thread IDs (before numbers)
+    (r'\[(?:PID|TID|pid|tid):\s*\d+\]', '<PROCESS_ID>'),
+    (r'(?:process|thread)\s+\d+', '<PROCESS_ID>'),
+    
+    # Unix timestamps (10-13 digits)
+    (r'\b\d{10,13}\b', '<UNIX_TIMESTAMP>'),
     
     # Paths
     (r'[A-Za-z]:[/\\][\w\\/.-]+', '<WINDOWS_PATH>'),
     (r'/[\w/.-]+', '<UNIX_PATH>'),
     
-    # Numbers
-    (r'\b\d+\.\d+\.\d+\.\d+(?::\d+)?\b', '<IP_ADDRESS>'),
+    # Generic numbers (last to avoid false positives)
     (r'\b\d{1,5}\b', '<NUMBER>'),
-    
-    # Durations and sizes
-    (r'\b\d+(?:\.\d+)?\s*(?:ms|sec|min|hr|KB|MB|GB|TB)\b', '<METRIC>'),
-    
-    # Process/Thread IDs
-    (r'\[(?:PID|TID|pid|tid):\s*\d+\]', '<PROCESS_ID>'),
-    (r'(?:process|thread)\s+\d+', '<PROCESS_ID>'),
 ]
 
 
