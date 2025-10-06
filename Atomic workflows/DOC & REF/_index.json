@@ -1,0 +1,78 @@
+{
+  "name": "DOC & REF",
+  "path": ".",
+  "type": "directory",
+  "children": [
+    {
+      "name": "add_remove_reorder atoms.md",
+      "path": "add_remove_reorder atoms.md",
+      "type": "file",
+      "extension": ".md"
+    },
+    {
+      "name": "Building a Foundational Library of Deterministic Workflows.txt",
+      "path": "Building a Foundational Library of Deterministic Workflows.txt",
+      "type": "file",
+      "extension": ".txt"
+    },
+    {
+      "name": "cli_tools_merged_full.md",
+      "path": "cli_tools_merged_full.md",
+      "type": "file",
+      "extension": ".md",
+      "title": "CLI Multi-Rapid: Comprehensive Tool & Application Registry"
+    },
+    {
+      "name": "Every atomic taskgets a globally unique.md",
+      "path": "Every atomic taskgets a globally unique.md",
+      "type": "file",
+      "extension": ".md"
+    },
+    {
+      "name": "Observability structured merge audit.md",
+      "path": "Observability structured merge audit.md",
+      "type": "file",
+      "extension": ".md"
+    },
+    {
+      "name": "Pillar Documentation Enterprise Agentic Workflow Architecture .md",
+      "path": "Pillar Documentation Enterprise Agentic Workflow Architecture .md",
+      "type": "file",
+      "extension": ".md",
+      "title": "Pillar Documentation Enterprise Agentic Workflow Architecture Complete"
+    },
+    {
+      "name": "reorder atoms without rewriting entire workflows.md",
+      "path": "reorder atoms without rewriting entire workflows.md",
+      "type": "file",
+      "extension": ".md"
+    },
+    {
+      "name": "slash_registry_optimized.v2.json",
+      "path": "slash_registry_optimized.v2.json",
+      "type": "file",
+      "extension": ".json"
+    },
+    {
+      "name": "spec_001_two_id_atomic_workflow_registry_db_backed (2).md",
+      "path": "spec_001_two_id_atomic_workflow_registry_db_backed (2).md",
+      "type": "file",
+      "extension": ".md",
+      "title": "SPEC-001-Two-ID Atomic Workflow Registry (DB-Backed)"
+    },
+    {
+      "name": "Two-ID Rule.md",
+      "path": "Two-ID Rule.md",
+      "type": "file",
+      "extension": ".md",
+      "title": "Goal"
+    },
+    {
+      "name": "Two_ID Atomic Workflow Conversion  Maintenance Manual.md",
+      "path": "Two_ID Atomic Workflow Conversion  Maintenance Manual.md",
+      "type": "file",
+      "extension": ".md",
+      "title": "Two-ID Atomic Workflow Conversion & Maintenance Manual"
+    }
+  ]
+}

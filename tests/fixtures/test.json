@@ -1,0 +1,8 @@
+{
+  "title": "Database migration task",
+  "description": "Applies database schema migrations and validates integrity",
+  "role": "task",
+  "inputs": ["migrations/*.sql", "schema.json"],
+  "outputs": ["migration-log.txt"],
+  "deps": []
+}
