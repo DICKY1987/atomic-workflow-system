@@ -1,0 +1,20 @@
+workflow:
+  ns: DOC
+  wf: tool_agnostic_multi_agent_code_modification_pipeline
+  wfv: v1
+  title: "Tool‑Agnostic Multi‑Agent Code Modification Pipeline"
+  purpose: >
+    Describes a unified atomic workflow for modifying a codebase using multiple agents and tools.  It
+    defines phases such as entry point processing, complexity assessment, moddoc initialization,
+    planning, routing, workspace preparation, iterative editing and execution, validation, integration,
+    CI/CD, release and observation.  Tasks are expressed as YAML fragments with role assignments.
+  atoms:
+    - atom_uid: 01DOC009ABCDEFGHIJKLMNOPQR
+      atom_key: DOC/tool_agnostic_multi_agent_code_modification_pipeline/v1/doc/all/001
+      title: "Multi‑agent modification pipeline documentation"
+      description: >
+        Contains the specification of the tool‑agnostic multi‑agent pipeline, including dozens of
+        atomic tasks across phases.  Roles such as orchestrator, planning_ai, thinking_ai,
+        cost_resource_manager, qa_test_agent and others are mapped to each atom.  This atom acts as a
+        wrapper for the full document until individual atoms are extracted.
+      source_file: "ATOMIZED_PROCESSES/Tool-Agnostic Multi-Agent Code Modification Pipeline.md"

@@ -1,0 +1,489 @@
+# Atomic Task Orchestrator
+# Executes multi-step tasks with deterministic checkpointing and rollback
+
+meta:
+  workflow_id: "atomic-orchestrator-v1"
+  version: "1.0.0"
+  purpose: "Execute complex workflows as atomic operations with Two-ID governance, parallel execution, and automatic rollback"
+  author: "Atomic Workflow System"
+  created: "2025-10-06"
+  based_on: "../CLAUDE.md Two-ID governance system"
+
+inputs:
+  - name: workflow_definition
+    kind: file
+    mime: application/yaml
+    description: "Workflow YAML file containing atoms to execute"
+    required: true
+
+  - name: execution_mode
+    kind: text
+    description: "Execution mode: sequential | parallel | hybrid"
+    default: "hybrid"
+
+  - name: checkpoint_after_each
+    kind: boolean
+    description: "Create Git checkpoint after each atom"
+    default: true
+
+  - name: rollback_on_failure
+    kind: boolean
+    description: "Automatically rollback to last valid checkpoint on failure"
+    default: true
+
+  - name: max_parallel
+    kind: number
+    description: "Maximum parallel atoms to execute"
+    default: 5
+
+outputs:
+  - name: execution_report
+    kind: json
+    description: "Detailed execution report with timing and results"
+
+  - name: checkpoint_registry
+    kind: json
+    description: "Registry of all checkpoints created"
+
+  - name: atom_results
+    kind: table
+    description: "Results from each atom execution"
+
+atoms:
+  - atom_uid: "01JADVZT0000000000000000C1"
+    atom_key: "workflows/orchestrator/v1/load/all/001"
+    title: "Load and validate workflow definition"
+    runtime:
+      language: python
+      entrypoint: |
+        import yaml
+        import jsonschema
+
+        # Load workflow
+        with open(inputs['workflow_definition'], 'r') as f:
+          workflow = yaml.safe_load(f)
+
+        # Validate against atomic schema
+        schema_path = "../atomic_two_id_tooling/atoms/schema/atomic_task.schema.json"
+        with open(schema_path, 'r') as f:
+          schema = json.load(f)
+
+        # Validate each atom
+        atoms = workflow.get('atoms', [])
+        for atom in atoms:
+          jsonschema.validate(atom, schema)
+
+        # Build dependency graph
+        dep_graph = build_dependency_graph(atoms)
+
+        # Validate no circular dependencies
+        if has_circular_deps(dep_graph):
+          raise ValueError("Circular dependencies detected")
+
+        outputs['workflow'] = workflow
+        outputs['atoms'] = atoms
+        outputs['dep_graph'] = dep_graph
+        outputs['atom_count'] = len(atoms)
+    inputs: [workflow_definition]
+    outputs: [workflow, atoms, dep_graph, atom_count]
+
+  - atom_uid: "01JADVZT0000000000000000C2"
+    atom_key: "workflows/orchestrator/v1/plan/all/002"
+    title: "Generate execution plan"
+    runtime:
+      language: python
+      entrypoint: |
+        # Topological sort for dependency resolution
+        execution_order = topological_sort(inputs['dep_graph'])
+
+        # Identify atoms that can run in parallel
+        parallel_groups = []
+        current_group = []
+
+        for atom_uid in execution_order:
+          atom = find_atom_by_uid(inputs['atoms'], atom_uid)
+          deps = atom.get('deps', [])
+
+          # Check if all deps satisfied by previous groups
+          if all(dep_satisfied(dep, parallel_groups) for dep in deps):
+            current_group.append(atom_uid)
+          else:
+            # Start new group
+            if current_group:
+              parallel_groups.append(current_group)
+            current_group = [atom_uid]
+
+        if current_group:
+          parallel_groups.append(current_group)
+
+        # Apply max_parallel constraint
+        execution_plan = []
+        for group in parallel_groups:
+          # Split large groups
+          for i in range(0, len(group), inputs['max_parallel']):
+            batch = group[i:i + inputs['max_parallel']]
+            execution_plan.append({
+              'batch_id': len(execution_plan),
+              'atom_uids': batch,
+              'parallel': len(batch) > 1
+            })
+
+        outputs['execution_plan'] = execution_plan
+        outputs['total_batches'] = len(execution_plan)
+    deps: ["01JADVZT0000000000000000C1"]
+    inputs: [atoms, dep_graph, max_parallel]
+    outputs: [execution_plan, total_batches]
+
+  - atom_uid: "01JADVZT0000000000000000C3"
+    atom_key: "workflows/orchestrator/v1/init/all/003"
+    title: "Initialize execution environment"
+    runtime:
+      language: python
+      entrypoint: |
+        import os
+        from datetime import datetime
+
+        # Create execution workspace
+        exec_id = f"exec_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        workspace = f".workflows/executions/{exec_id}"
+        os.makedirs(workspace, exist_ok=True)
+
+        # Initialize checkpoint registry
+        checkpoint_registry = {
+          'execution_id': exec_id,
+          'workflow_id': inputs['workflow'].get('meta', {}).get('workflow_id'),
+          'checkpoints': [],
+          'start_time': datetime.now().isoformat()
+        }
+
+        # Initialize result tracking
+        atom_results = {atom['atom_uid']: None for atom in inputs['atoms']}
+
+        outputs['exec_id'] = exec_id
+        outputs['workspace'] = workspace
+        outputs['checkpoint_registry'] = checkpoint_registry
+        outputs['atom_results'] = atom_results
+    deps: ["01JADVZT0000000000000000C2"]
+    inputs: [workflow, atoms]
+    outputs: [exec_id, workspace, checkpoint_registry, atom_results]
+
+  - atom_uid: "01JADVZT0000000000000000C4"
+    atom_key: "workflows/orchestrator/v1/checkpoint/all/004"
+    title: "Create initial checkpoint"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        if [[ "${inputs['checkpoint_after_each']}" == "true" ]]; then
+          git add -A
+          git commit -m "checkpoint: workflow execution start [${inputs['exec_id']}]" \
+            --no-verify || echo "No changes to checkpoint"
+
+          CHECKPOINT_SHA=$(git rev-parse HEAD)
+          outputs['initial_checkpoint']=$CHECKPOINT_SHA
+
+          echo "Initial checkpoint: $CHECKPOINT_SHA"
+        else
+          outputs['initial_checkpoint']="none"
+        fi
+    deps: ["01JADVZT0000000000000000C3"]
+    inputs: [checkpoint_after_each, exec_id]
+    outputs: [initial_checkpoint]
+
+  - atom_uid: "01JADVZT0000000000000000C5"
+    atom_key: "workflows/orchestrator/v1/execute/all/005"
+    title: "Execute workflow batches"
+    runtime:
+      language: python
+      entrypoint: |
+        import subprocess
+        import concurrent.futures
+        import json
+        from datetime import datetime
+
+        def execute_atom(atom, context):
+          """Execute a single atom"""
+          atom_uid = atom['atom_uid']
+          atom_key = atom['atom_key']
+
+          print(f"Executing: {atom_key} ({atom_uid})")
+
+          start_time = datetime.now()
+
+          try:
+            runtime = atom.get('runtime', {})
+            language = runtime.get('language', 'bash')
+            entrypoint = runtime.get('entrypoint', '')
+
+            # Prepare execution context
+            exec_env = os.environ.copy()
+            exec_env['ATOM_UID'] = atom_uid
+            exec_env['ATOM_KEY'] = atom_key
+
+            # Execute based on language
+            if language == 'python':
+              result = exec_python_atom(atom, context)
+            elif language == 'bash':
+              result = exec_bash_atom(atom, context)
+            elif language == 'powershell':
+              result = exec_powershell_atom(atom, context)
+            else:
+              raise ValueError(f"Unsupported runtime: {language}")
+
+            duration = (datetime.now() - start_time).total_seconds()
+
+            return {
+              'atom_uid': atom_uid,
+              'atom_key': atom_key,
+              'status': 'success',
+              'duration': duration,
+              'outputs': result.get('outputs', {}),
+              'timestamp': datetime.now().isoformat()
+            }
+
+          except Exception as e:
+            duration = (datetime.now() - start_time).total_seconds()
+            return {
+              'atom_uid': atom_uid,
+              'atom_key': atom_key,
+              'status': 'failed',
+              'error': str(e),
+              'duration': duration,
+              'timestamp': datetime.now().isoformat()
+            }
+
+        # Execute batches
+        all_results = []
+        context = {
+          'workspace': inputs['workspace'],
+          'exec_id': inputs['exec_id']
+        }
+
+        for batch in inputs['execution_plan']:
+          batch_id = batch['batch_id']
+          atom_uids = batch['atom_uids']
+          is_parallel = batch['parallel']
+
+          print(f"\n=== Batch {batch_id} ({len(atom_uids)} atoms, parallel={is_parallel}) ===")
+
+          batch_atoms = [find_atom_by_uid(inputs['atoms'], uid) for uid in atom_uids]
+
+          if is_parallel:
+            # Execute in parallel
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(atom_uids)) as executor:
+              futures = [executor.submit(execute_atom, atom, context) for atom in batch_atoms]
+              batch_results = [f.result() for f in futures]
+          else:
+            # Execute sequentially
+            batch_results = [execute_atom(atom, context) for atom in batch_atoms]
+
+          all_results.extend(batch_results)
+
+          # Update atom_results
+          for result in batch_results:
+            inputs['atom_results'][result['atom_uid']] = result
+
+          # Check for failures
+          failures = [r for r in batch_results if r['status'] == 'failed']
+          if failures and inputs['rollback_on_failure']:
+            print(f"Batch {batch_id} had {len(failures)} failures. Triggering rollback.")
+            outputs['execution_failed'] = True
+            outputs['failed_atoms'] = failures
+            break
+
+          # Checkpoint after batch
+          if inputs['checkpoint_after_each']:
+            git_checkpoint(f"batch-{batch_id}-complete", inputs['exec_id'])
+
+        outputs['all_results'] = all_results
+        outputs['execution_failed'] = any(r['status'] == 'failed' for r in all_results)
+    deps: ["01JADVZT0000000000000000C4"]
+    inputs: [execution_plan, atoms, workspace, exec_id, checkpoint_after_each,
+             rollback_on_failure, atom_results]
+    outputs: [all_results, execution_failed, failed_atoms]
+
+  - atom_uid: "01JADVZT0000000000000000C6"
+    atom_key: "workflows/orchestrator/v1/rollback/all/006"
+    title: "Rollback on failure (if enabled)"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        if [[ "${inputs['execution_failed']}" == "true" ]] && \
+           [[ "${inputs['rollback_on_failure']}" == "true" ]]; then
+
+          echo "Rolling back to initial checkpoint..."
+
+          # Rollback to initial checkpoint
+          git reset --hard "${inputs['initial_checkpoint']}"
+          git clean -fd
+
+          outputs['rolled_back']=true
+          outputs['rollback_target']="${inputs['initial_checkpoint']}"
+
+          echo "Rollback complete. State restored to: ${inputs['initial_checkpoint']}"
+        else
+          outputs['rolled_back']=false
+          outputs['rollback_target']="none"
+        fi
+    deps: ["01JADVZT0000000000000000C5"]
+    inputs: [execution_failed, rollback_on_failure, initial_checkpoint]
+    outputs: [rolled_back, rollback_target]
+
+  - atom_uid: "01JADVZT0000000000000000C7"
+    atom_key: "workflows/orchestrator/v1/report/all/007"
+    title: "Generate execution report"
+    runtime:
+      language: python
+      entrypoint: |
+        from datetime import datetime
+        import json
+
+        # Calculate statistics
+        total_atoms = len(inputs['all_results'])
+        successful = sum(1 for r in inputs['all_results'] if r['status'] == 'success')
+        failed = sum(1 for r in inputs['all_results'] if r['status'] == 'failed')
+        total_duration = sum(r['duration'] for r in inputs['all_results'])
+
+        report = {
+          'execution_id': inputs['exec_id'],
+          'workflow_id': inputs['workflow'].get('meta', {}).get('workflow_id'),
+          'execution_mode': inputs['execution_mode'],
+          'statistics': {
+            'total_atoms': total_atoms,
+            'successful': successful,
+            'failed': failed,
+            'success_rate': successful / total_atoms if total_atoms > 0 else 0,
+            'total_duration_seconds': total_duration,
+            'batches_executed': inputs['total_batches']
+          },
+          'atoms': inputs['all_results'],
+          'rollback': {
+            'triggered': inputs['rolled_back'],
+            'target': inputs['rollback_target']
+          },
+          'checkpoints': inputs['checkpoint_registry'],
+          'timestamp': datetime.now().isoformat(),
+          'success': not inputs['execution_failed']
+        }
+
+        # Write report
+        report_path = f"{inputs['workspace']}/execution_report.json"
+        with open(report_path, 'w') as f:
+          json.dump(report, f, indent=2)
+
+        # Also append to audit log
+        audit_path = ".workflows/audit/executions.jsonl"
+        with open(audit_path, 'a') as f:
+          f.write(json.dumps(report) + '\n')
+
+        outputs['execution_report'] = report
+    deps: ["01JADVZT0000000000000000C6"]
+    inputs: [exec_id, workflow, execution_mode, all_results, total_batches,
+             rolled_back, rollback_target, checkpoint_registry, workspace, execution_failed]
+    outputs: [execution_report]
+
+helper_functions:
+  build_dependency_graph: |
+    def build_dependency_graph(atoms):
+      """Build dependency graph from atoms"""
+      graph = {}
+      for atom in atoms:
+        atom_uid = atom['atom_uid']
+        deps = atom.get('deps', [])
+        graph[atom_uid] = deps
+      return graph
+
+  has_circular_deps: |
+    def has_circular_deps(graph):
+      """Detect circular dependencies using DFS"""
+      visited = set()
+      rec_stack = set()
+
+      def visit(node):
+        if node in rec_stack:
+          return True  # Circular dependency
+        if node in visited:
+          return False
+
+        visited.add(node)
+        rec_stack.add(node)
+
+        for dep in graph.get(node, []):
+          if visit(dep):
+            return True
+
+        rec_stack.remove(node)
+        return False
+
+      for node in graph:
+        if visit(node):
+          return True
+
+      return False
+
+  topological_sort: |
+    def topological_sort(graph):
+      """Topologically sort atoms by dependencies"""
+      visited = set()
+      stack = []
+
+      def visit(node):
+        if node in visited:
+          return
+        visited.add(node)
+        for dep in graph.get(node, []):
+          visit(dep)
+        stack.append(node)
+
+      for node in graph:
+        visit(node)
+
+      return stack[::-1]  # Reverse for correct order
+
+  git_checkpoint: |
+    def git_checkpoint(phase, exec_id):
+      """Create Git checkpoint"""
+      import subprocess
+      subprocess.run(['git', 'add', '-A'], check=False)
+      subprocess.run([
+        'git', 'commit', '-m', f'checkpoint: {phase} [{exec_id}]', '--no-verify'
+      ], check=False)
+
+execution:
+  mode: sequential
+  error_handling: rollback_on_failure
+  parallelization:
+    enabled: true
+    strategy: dependency_aware
+    max_parallel: 5
+
+observability:
+  metrics:
+    - executions_total
+    - atoms_executed_total
+    - execution_duration_seconds
+    - success_rate
+    - rollback_rate
+    - parallel_efficiency
+
+  audit_trail:
+    path: ".workflows/audit/executions.jsonl"
+    format: jsonl
+
+examples:
+  - name: "Execute workflow with parallel optimization"
+    inputs:
+      workflow_definition: "my_workflow.yaml"
+      execution_mode: "hybrid"
+      checkpoint_after_each: true
+
+  - name: "Execute workflow without rollback"
+    inputs:
+      workflow_definition: "my_workflow.yaml"
+      rollback_on_failure: false
+      checkpoint_after_each: false

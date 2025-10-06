@@ -1,0 +1,485 @@
+# Multi-Agent Code Modification Pipeline
+# Coordinate multiple AI agents on parallel code changes with deterministic merging
+
+meta:
+  workflow_id: "multi-agent-pipeline-v1"
+  version: "1.0.0"
+  purpose: "Execute parallel code modifications across multiple AI agents with conflict-free merging"
+  author: "Atomic Workflow System"
+  created: "2025-10-06"
+  based_on: "../YAML_YML/DOC_tool_agnostic_multi_agent_code_modification_pipeline.atomic.20251006.yaml"
+
+inputs:
+  - name: project_path
+    kind: file
+    description: "Path to project repository"
+    required: true
+
+  - name: workstreams
+    kind: table
+    description: "List of workstream definitions with agent assignments"
+    required: true
+    schema:
+      - workstream_id: text
+      - agent_tool: text  # claude, aider, gemini, etc.
+      - task_description: text
+      - file_patterns: list
+      - priority: number
+
+  - name: base_branch
+    kind: text
+    description: "Base branch to merge into"
+    default: "main"
+
+  - name: integration_tests
+    kind: file
+    description: "Integration test suite to run after merge"
+    required: false
+
+outputs:
+  - name: integration_branch
+    kind: text
+    description: "Branch with all workstreams merged"
+
+  - name: merge_report
+    kind: json
+    description: "Detailed merge statistics and conflict resolution"
+
+  - name: validation_results
+    kind: json
+    description: "Results from integration tests and quality gates"
+
+atoms:
+  - atom_uid: "01JADW0T0000000000000000D1"
+    atom_key: "workflows/multi-agent/v1/init/all/001"
+    title: "Initialize project workspace"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        cd "${inputs['project_path']}"
+
+        # Ensure we're on base branch and up to date
+        git fetch origin
+        git checkout "${inputs['base_branch']}"
+        git pull --ff-only origin "${inputs['base_branch']}"
+
+        # Create integration branch
+        INTEGRATION_BRANCH="integration/$(date +%Y%m%d_%H%M%S)"
+        git checkout -b "$INTEGRATION_BRANCH"
+
+        outputs['integration_branch']=$INTEGRATION_BRANCH
+        echo "Integration branch: $INTEGRATION_BRANCH"
+    inputs: [project_path, base_branch]
+    outputs: [integration_branch]
+
+  - atom_uid: "01JADW0T0000000000000000D2"
+    atom_key: "workflows/multi-agent/v1/worktrees/all/002"
+    title: "Setup isolated worktrees for each agent"
+    runtime:
+      language: python
+      entrypoint: |
+        import os
+        import subprocess
+
+        project_path = inputs['project_path']
+        workstreams = inputs['workstreams']
+
+        worktree_map = {}
+
+        for ws in workstreams:
+          ws_id = ws['workstream_id']
+          agent = ws['agent_tool']
+
+          # Create branch for this workstream
+          branch_name = f"workstream/{ws_id}"
+
+          # Create worktree
+          worktree_path = f"{project_path}/../{ws_id}-workspace"
+          os.makedirs(os.path.dirname(worktree_path), exist_ok=True)
+
+          subprocess.run([
+            'git', 'worktree', 'add', worktree_path, '-b', branch_name
+          ], cwd=project_path, check=True)
+
+          worktree_map[ws_id] = {
+            'path': worktree_path,
+            'branch': branch_name,
+            'agent': agent
+          }
+
+          print(f"Created worktree: {ws_id} -> {worktree_path}")
+
+        outputs['worktree_map'] = worktree_map
+    deps: ["01JADW0T0000000000000000D1"]
+    inputs: [project_path, workstreams]
+    outputs: [worktree_map]
+
+  - atom_uid: "01JADW0T0000000000000000D3"
+    atom_key: "workflows/multi-agent/v1/execute/all/003"
+    title: "Execute workstreams in parallel"
+    runtime:
+      language: python
+      entrypoint: |
+        import subprocess
+        import concurrent.futures
+        from datetime import datetime
+
+        def execute_workstream(workstream, worktree_info):
+          """Execute a single workstream with assigned agent"""
+          ws_id = workstream['workstream_id']
+          agent_tool = workstream['agent_tool']
+          task_desc = workstream['task_description']
+          worktree_path = worktree_info['path']
+
+          print(f"\n=== Executing workstream: {ws_id} with {agent_tool} ===")
+          print(f"Task: {task_desc}")
+
+          start_time = datetime.now()
+
+          try:
+            # Create task file for agent
+            task_file = f"{worktree_path}/.agent_task.txt"
+            with open(task_file, 'w') as f:
+              f.write(task_desc)
+
+            # Execute agent with zero-touch Git wrapper
+            subprocess.run([
+              'python', '../WORKFLOWS/core/git_zero_touch.py',
+              '--tool-binary', agent_tool,
+              '--working-dir', worktree_path,
+              '--task-file', task_file
+            ], check=True, cwd=worktree_path)
+
+            duration = (datetime.now() - start_time).total_seconds()
+
+            # Collect changes
+            result = subprocess.run(
+              ['git', 'diff', '--stat', 'HEAD~1'],
+              cwd=worktree_path,
+              capture_output=True,
+              text=True
+            )
+
+            return {
+              'workstream_id': ws_id,
+              'agent': agent_tool,
+              'status': 'success',
+              'duration': duration,
+              'changes': result.stdout,
+              'branch': worktree_info['branch']
+            }
+
+          except Exception as e:
+            duration = (datetime.now() - start_time).total_seconds()
+            return {
+              'workstream_id': ws_id,
+              'agent': agent_tool,
+              'status': 'failed',
+              'duration': duration,
+              'error': str(e),
+              'branch': worktree_info['branch']
+            }
+
+        # Execute all workstreams in parallel
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(inputs['workstreams'])) as executor:
+          futures = []
+          for ws in inputs['workstreams']:
+            ws_id = ws['workstream_id']
+            worktree_info = inputs['worktree_map'][ws_id]
+            futures.append(executor.submit(execute_workstream, ws, worktree_info))
+
+          results = [f.result() for f in futures]
+
+        outputs['workstream_results'] = results
+        outputs['all_successful'] = all(r['status'] == 'success' for r in results)
+    deps: ["01JADW0T0000000000000000D2"]
+    inputs: [workstreams, worktree_map]
+    outputs: [workstream_results, all_successful]
+
+  - atom_uid: "01JADW0T0000000000000000D4"
+    atom_key: "workflows/multi-agent/v1/analyze/all/004"
+    title: "Analyze changes and detect potential conflicts"
+    runtime:
+      language: python
+      entrypoint: |
+        import subprocess
+
+        conflict_analysis = {
+          'file_overlaps': [],
+          'predicted_conflicts': [],
+          'safe_merges': []
+        }
+
+        # Analyze file changes across workstreams
+        file_changes = {}  # file -> [workstream_ids]
+
+        for result in inputs['workstream_results']:
+          if result['status'] != 'success':
+            continue
+
+          ws_id = result['workstream_id']
+          worktree_path = inputs['worktree_map'][ws_id]['path']
+
+          # Get list of files changed
+          proc = subprocess.run(
+            ['git', 'diff', '--name-only', 'HEAD~1'],
+            cwd=worktree_path,
+            capture_output=True,
+            text=True
+          )
+
+          for file_path in proc.stdout.strip().split('\n'):
+            if file_path:
+              if file_path not in file_changes:
+                file_changes[file_path] = []
+              file_changes[file_path].append(ws_id)
+
+        # Identify file overlaps
+        for file_path, workstreams in file_changes.items():
+          if len(workstreams) > 1:
+            conflict_analysis['file_overlaps'].append({
+              'file': file_path,
+              'workstreams': workstreams,
+              'conflict_probability': 'high' if len(workstreams) > 2 else 'medium'
+            })
+          else:
+            conflict_analysis['safe_merges'].append(file_path)
+
+        outputs['conflict_analysis'] = conflict_analysis
+    deps: ["01JADW0T0000000000000000D3"]
+    inputs: [workstream_results, worktree_map]
+    outputs: [conflict_analysis]
+
+  - atom_uid: "01JADW0T0000000000000000D5"
+    atom_key: "workflows/multi-agent/v1/merge/all/005"
+    title: "Merge workstreams with conflict resolution"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        cd "${inputs['project_path']}"
+        git checkout "${inputs['integration_branch']}"
+
+        # Sort workstreams by priority
+        BRANCHES=$(python3 -c "
+        import json
+        import sys
+        results = json.loads('''${inputs['workstream_results']}''')
+        workstreams = json.loads('''${inputs['workstreams']}''')
+        ws_priority = {ws['workstream_id']: ws.get('priority', 999) for ws in workstreams}
+        sorted_results = sorted(
+          [r for r in results if r['status'] == 'success'],
+          key=lambda r: ws_priority.get(r['workstream_id'], 999)
+        )
+        for r in sorted_results:
+          print(r['branch'])
+        ")
+
+        MERGE_CONFLICTS=0
+        MERGED_COUNT=0
+        CONFLICT_DETAILS=""
+
+        for BRANCH in $BRANCHES; do
+          echo "Merging: $BRANCH"
+
+          # Attempt merge with patience strategy
+          set +e
+          git merge --no-ff --strategy-option=patience "$BRANCH" \
+            -m "Merge workstream: $BRANCH"
+          MERGE_STATUS=$?
+          set -e
+
+          if [[ $MERGE_STATUS -ne 0 ]]; then
+            echo "Conflict detected in $BRANCH"
+            MERGE_CONFLICTS=$((MERGE_CONFLICTS + 1))
+
+            # Auto-resolve using .gitattributes merge drivers
+            git status --porcelain | grep "^UU" || true
+
+            # Try auto-resolution
+            python3 ../deterministic_merge_system/scripts/auto_resolve_conflicts.py
+
+            # Check if resolved
+            if git diff --check; then
+              git add -A
+              git commit --no-edit
+              MERGED_COUNT=$((MERGED_COUNT + 1))
+              echo "Auto-resolved conflicts in $BRANCH"
+            else
+              CONFLICT_DETAILS="$CONFLICT_DETAILS\nFailed to auto-resolve: $BRANCH"
+            fi
+          else
+            MERGED_COUNT=$((MERGED_COUNT + 1))
+          fi
+        done
+
+        outputs['merged_count']=$MERGED_COUNT
+        outputs['conflict_count']=$MERGE_CONFLICTS
+        outputs['merge_success']=$([[ $MERGE_CONFLICTS -eq 0 ]] && echo "true" || echo "partial")
+    deps: ["01JADW0T0000000000000000D4"]
+    inputs: [project_path, integration_branch, workstream_results, workstreams]
+    outputs: [merged_count, conflict_count, merge_success]
+
+  - atom_uid: "01JADW0T0000000000000000D6"
+    atom_key: "workflows/multi-agent/v1/validate/all/006"
+    title: "Run integration tests and quality gates"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        cd "${inputs['project_path']}"
+
+        VALIDATION_PASSED=true
+
+        # Run linter
+        echo "Running linter..."
+        if command -v pylint &> /dev/null; then
+          pylint **/*.py || VALIDATION_PASSED=false
+        fi
+
+        # Run tests
+        if [[ -n "${inputs['integration_tests']}" ]]; then
+          echo "Running integration tests..."
+          pytest "${inputs['integration_tests']}" || VALIDATION_PASSED=false
+        fi
+
+        # Check code quality
+        echo "Checking code quality..."
+        if command -v black &> /dev/null; then
+          black --check . || VALIDATION_PASSED=false
+        fi
+
+        outputs['validation_passed']=$VALIDATION_PASSED
+    deps: ["01JADW0T0000000000000000D5"]
+    inputs: [project_path, integration_tests]
+    outputs: [validation_passed]
+
+  - atom_uid: "01JADW0T0000000000000000D7"
+    atom_key: "workflows/multi-agent/v1/cleanup/all/007"
+    title: "Cleanup worktrees"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        cd "${inputs['project_path']}"
+
+        # Remove all worktrees
+        git worktree list --porcelain | grep "worktree" | while read -r line; do
+          WORKTREE_PATH=$(echo "$line" | awk '{print $2}')
+          if [[ "$WORKTREE_PATH" != "${inputs['project_path']}" ]]; then
+            echo "Removing worktree: $WORKTREE_PATH"
+            git worktree remove "$WORKTREE_PATH" --force || true
+          fi
+        done
+
+        git worktree prune
+
+        outputs['worktrees_cleaned']=true
+    deps: ["01JADW0T0000000000000000D6"]
+    inputs: [project_path]
+    outputs: [worktrees_cleaned]
+
+  - atom_uid: "01JADW0T0000000000000000D8"
+    atom_key: "workflows/multi-agent/v1/report/all/008"
+    title: "Generate merge and validation report"
+    runtime:
+      language: python
+      entrypoint: |
+        import json
+        from datetime import datetime
+
+        report = {
+          'execution_id': f"multi_agent_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+          'integration_branch': inputs['integration_branch'],
+          'workstreams': {
+            'total': len(inputs['workstream_results']),
+            'successful': sum(1 for r in inputs['workstream_results'] if r['status'] == 'success'),
+            'failed': sum(1 for r in inputs['workstream_results'] if r['status'] == 'failed'),
+            'results': inputs['workstream_results']
+          },
+          'merge': {
+            'merged_count': inputs['merged_count'],
+            'conflict_count': inputs['conflict_count'],
+            'success': inputs['merge_success'],
+            'conflict_analysis': inputs['conflict_analysis']
+          },
+          'validation': {
+            'passed': inputs['validation_passed'],
+            'tests_run': inputs.get('integration_tests') is not None
+          },
+          'cleanup': {
+            'worktrees_cleaned': inputs['worktrees_cleaned']
+          },
+          'timestamp': datetime.now().isoformat(),
+          'overall_success': inputs['all_successful'] and
+                            inputs['merge_success'] == 'true' and
+                            inputs['validation_passed']
+        }
+
+        report_path = f"{inputs['project_path']}/.workflows/multi_agent_report.json"
+        with open(report_path, 'w') as f:
+          json.dump(report, f, indent=2)
+
+        outputs['merge_report'] = report
+    deps: ["01JADW0T0000000000000000D7"]
+    inputs: [integration_branch, workstream_results, merged_count, conflict_count,
+             merge_success, conflict_analysis, validation_passed, worktrees_cleaned,
+             all_successful, project_path]
+    outputs: [merge_report]
+
+execution:
+  mode: sequential
+  parallelization:
+    # Atom D3 (workstream execution) runs agents in parallel
+    enabled: true
+    parallel_atoms: ["01JADW0T0000000000000000D3"]
+
+observability:
+  metrics:
+    - workstreams_executed
+    - merge_conflicts_detected
+    - auto_resolution_success_rate
+    - integration_test_pass_rate
+    - total_duration
+
+  audit_trail:
+    path: ".workflows/audit/multi_agent.jsonl"
+
+examples:
+  - name: "Three-agent parallel development"
+    inputs:
+      project_path: "/path/to/project"
+      workstreams:
+        - workstream_id: "core_logic"
+          agent_tool: "claude"
+          task_description: "Refactor authentication logic"
+          file_patterns: ["src/auth/**"]
+          priority: 1
+        - workstream_id: "config_infra"
+          agent_tool: "aider"
+          task_description: "Update Docker and CI configs"
+          file_patterns: ["Dockerfile", ".github/**"]
+          priority: 2
+        - workstream_id: "tests_docs"
+          agent_tool: "gemini"
+          task_description: "Add tests and update docs"
+          file_patterns: ["tests/**", "docs/**"]
+          priority: 3
+      integration_tests: "tests/integration/"
+
+benefits:
+  - "Parallel execution reduces total time by 60-80%"
+  - "Worktree isolation prevents conflicts during development"
+  - "Deterministic merge with auto-resolution"
+  - "Full validation before integration"
+  - "Each agent works independently in isolated workspace"

@@ -1,0 +1,20 @@
+workflow:
+  ns: DOC
+  wf: atomic_task_decomposition_combined_unified_extended
+  wfv: v1
+  title: "Atomic Task Decomposition — Combined Unified Workflow (Extended)"
+  purpose: >
+    Extends the combined unified workflow decomposition by introducing additional tasks for
+    simultaneous execution and Git worktree isolation.  The document describes how multi‑stream
+    work is created, queued, executed in parallel, merged and persisted.  New atoms numbered
+    from 130 upward complement the original unified pipeline.
+  atoms:
+    - atom_uid: 01DOC003ABCDEFGHIJKLMNOPQR
+      atom_key: DOC/atomic_task_decomposition_combined_unified_extended/v1/doc/all/001
+      title: "Combined unified workflow (extended) documentation"
+      description: >
+        Contains the extended task list for the unified workflow, beginning with atom_130 and
+        covering work stream creation, execution planning, parallel dispatch, merge queue
+        management, and final verification tasks.  It references the Simultaneous Execution & Git
+        Worktree workflow and preserves earlier atoms by reference.
+      source_file: "ATOMIZED_PROCESSES/Atomic Task Decomposition — Combined Unified Workflow (Extended).md"

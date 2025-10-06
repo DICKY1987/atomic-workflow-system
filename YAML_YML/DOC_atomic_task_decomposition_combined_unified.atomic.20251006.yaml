@@ -1,0 +1,21 @@
+workflow:
+  ns: DOC
+  wf: atomic_task_decomposition_combined_unified
+  wfv: v1
+  title: "Atomic Task Decomposition — Combined Unified Workflow"
+  purpose: >
+    Enumerates all atomic tasks defined in the combined unified pipeline (COMBINED.nested.yaml).  Each
+    task represents a single‑responsibility operation assigned to a specific role across the seed draft,
+    requirements, scope, architecture, contracts, decomposition, initial code generation, test
+    hardening, review & compliance, release & observe, artifact translation, plan & route, and
+    tool/role selection.  Branching tasks performed by different roles are listed separately.
+  atoms:
+    - atom_uid: 01DOC004ABCDEFGHIJKLMNOPQR
+      atom_key: DOC/atomic_task_decomposition_combined_unified/v1/doc/all/001
+      title: "Combined unified workflow documentation"
+      description: >
+        Captures the entire task list for the combined unified workflow.  Tasks such as collect_context,
+        derive_requirements, model_architecture, decompose, sequence, codegen, add_tests, review,
+        release_plan, capture_learnings and dozens more are described with their assigned roles.
+        The document provides a high‑level seed‑to‑release pipeline with bridging and planning layers.
+      source_file: "ATOMIZED_PROCESSES/Atomic Task Decomposition — Combined Unified Workflow.md"

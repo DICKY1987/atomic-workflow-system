@@ -1,0 +1,182 @@
+# GitHub Init Workspace Workflow
+# Initialize isolated workspace with proper branch strategy
+
+meta:
+  workflow_id: "gh-init-workspace-v1"
+  version: "1.0.0"
+  purpose: "Initialize isolated workspace for pipeline execution"
+  author: "Atomic Workflow System"
+  created: "2025-10-06"
+
+inputs:
+  - name: repo_url
+    kind: text
+    description: "GitHub repository URL"
+    required: true
+
+  - name: workstream_id
+    kind: text
+    description: "Workstream identifier for branch naming"
+    required: false
+
+  - name: base_branch
+    kind: text
+    description: "Base branch to branch from"
+    default: "main"
+
+  - name: use_worktree
+    kind: boolean
+    description: "Use git worktree for isolation"
+    default: false
+
+outputs:
+  - name: workspace_dir
+    kind: text
+    description: "Path to workspace directory"
+
+  - name: branch_name
+    kind: text
+    description: "Feature branch created"
+
+  - name: remote_url
+    kind: text
+    description: "Remote repository URL"
+
+atoms:
+  - atom_uid: "01JADW3T0000000000000000F1"
+    atom_key: "workflows/gh-init-workspace/v1/clone/all/001"
+    title: "Clone or update repository"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        REPO_URL="${inputs['repo_url']}"
+        REPO_NAME=$(basename "$REPO_URL" .git)
+
+        if [[ -d "$REPO_NAME/.git" ]]; then
+          echo "Repository exists, updating..."
+          cd "$REPO_NAME"
+          git fetch origin --prune
+        else
+          echo "Cloning repository..."
+          gh repo clone "$REPO_URL" "$REPO_NAME" --depth 1
+          cd "$REPO_NAME"
+        fi
+
+        outputs['workspace_dir']=$(pwd)
+        outputs['repo_name']=$REPO_NAME
+    inputs: [repo_url]
+    outputs: [workspace_dir, repo_name]
+
+  - atom_uid: "01JADW3T0000000000000000F2"
+    atom_key: "workflows/gh-init-workspace/v1/config/all/002"
+    title: "Configure Git identity"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        cd "${inputs['workspace_dir']}"
+
+        # Configure Git user from environment or defaults
+        GIT_USER="${GIT_USER_NAME:-Atomic Workflow Bot}"
+        GIT_EMAIL="${GIT_USER_EMAIL:-bot@atomic-workflows.local}"
+
+        git config user.name "$GIT_USER"
+        git config user.email "$GIT_EMAIL"
+
+        # Set gh as default remote helper
+        gh repo set-default || true
+
+        echo "Git configured: $GIT_USER <$GIT_EMAIL>"
+    deps: ["01JADW3T0000000000000000F1"]
+    inputs: [workspace_dir]
+    outputs: []
+
+  - atom_uid: "01JADW3T0000000000000000F3"
+    atom_key: "workflows/gh-init-workspace/v1/branch/all/003"
+    title: "Create feature branch"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        cd "${inputs['workspace_dir']}"
+
+        BASE_BRANCH="${inputs['base_branch']}"
+
+        # Checkout base branch
+        git checkout -B "$BASE_BRANCH" "origin/$BASE_BRANCH" || git checkout "$BASE_BRANCH"
+        git pull --ff-only origin "$BASE_BRANCH"
+
+        # Create feature branch
+        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        if [[ -n "${inputs['workstream_id']}" ]]; then
+          BRANCH_NAME="feature/${inputs['workstream_id']}/${TIMESTAMP}"
+        else
+          BRANCH_NAME="feature/workflow_${TIMESTAMP}"
+        fi
+
+        git checkout -b "$BRANCH_NAME"
+
+        outputs['branch_name']=$BRANCH_NAME
+
+        echo "Created branch: $BRANCH_NAME"
+    deps: ["01JADW3T0000000000000000F2"]
+    inputs: [workspace_dir, base_branch, workstream_id]
+    outputs: [branch_name]
+
+  - atom_uid: "01JADW3T0000000000000000F4"
+    atom_key: "workflows/gh-init-workspace/v1/worktree/all/004"
+    title: "Setup worktree if enabled"
+    runtime:
+      language: bash
+      entrypoint: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        if [[ "${inputs['use_worktree']}" == "true" ]]; then
+          WORKTREE_DIR="${inputs['workspace_dir']}/../${inputs['workstream_id']}-worktree"
+
+          git worktree add "$WORKTREE_DIR" "${inputs['branch_name']}" || true
+
+          outputs['worktree_path']=$WORKTREE_DIR
+          outputs['using_worktree']=true
+        else
+          outputs['worktree_path']="none"
+          outputs['using_worktree']=false
+        fi
+    deps: ["01JADW3T0000000000000000F3"]
+    inputs: [use_worktree, workspace_dir, workstream_id, branch_name]
+    outputs: [worktree_path, using_worktree]
+
+  - atom_uid: "01JADW3T0000000000000000F5"
+    atom_key: "workflows/gh-init-workspace/v1/report/all/005"
+    title: "Generate workspace report"
+    runtime:
+      language: python
+      entrypoint: |
+        import json
+
+        report = {
+          'workspace_dir': inputs['workspace_dir'],
+          'branch_name': inputs['branch_name'],
+          'remote_url': inputs['repo_url'],
+          'base_branch': inputs['base_branch'],
+          'worktree': {
+            'enabled': inputs['using_worktree'],
+            'path': inputs['worktree_path']
+          }
+        }
+
+        with open('.workflows/workspace_init.json', 'w') as f:
+          json.dump(report, f, indent=2)
+
+        outputs['remote_url'] = inputs['repo_url']
+    deps: ["01JADW3T0000000000000000F4"]
+    inputs: [workspace_dir, branch_name, repo_url, base_branch, using_worktree, worktree_path]
+    outputs: [remote_url]

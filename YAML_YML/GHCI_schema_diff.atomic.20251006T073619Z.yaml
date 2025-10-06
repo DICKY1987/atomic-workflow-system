@@ -1,0 +1,37 @@
+workflow:
+  ns: GHCI
+  wf: SCHEMA_DIFF
+  wfv: v1
+  title: "JSON schema diff gate"
+  trigger:
+    on: [pull_request]
+    paths:
+      include: ["**/*.schema.json", "**/*.json"]
+  purpose: "Detect breaking changes in JSON schemas; block PR if incompatible."
+  registry_generated: true
+
+atoms:
+  - atom_uid: 01JAX0A0SCHDIFF001
+    atom_key: GHCI/SCHEMA_DIFF/v1/PH1/SETUP/001
+    title: Setup Python
+    deps: []
+    commands:
+      - gha: "actions/checkout@v4"
+      - gha: "actions/setup-python@v5"
+      - run: "python -m pip install -U pip jsonschema semver"
+
+  - atom_uid: 01JAX0A0SCHDIFF002
+    atom_key: GHCI/SCHEMA_DIFF/v1/PH2/DIFF/002
+    title: Run schema diff
+    deps: [GHCI/SCHEMA_DIFF/v1/PH1/SETUP/001]
+    commands:
+      - run: "python scripts/schema_diff.py --fail-on-breaking"
+
+  - atom_uid: 01JAX0A0SCHDIFF003
+    atom_key: GHCI/SCHEMA_DIFF/v1/PH3/REPORT/003
+    title: Upload artifact
+    deps: [GHCI/SCHEMA_DIFF/v1/PH2/DIFF/002]
+    commands:
+      - gha: "actions/upload-artifact@v4"
+    acceptance_criteria:
+      - "Diff report uploaded"

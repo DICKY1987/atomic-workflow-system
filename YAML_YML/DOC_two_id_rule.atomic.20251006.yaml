@@ -1,0 +1,20 @@
+workflow:
+  ns: DOC
+  wf: two_id_rule
+  wfv: v1
+  title: "Two‑ID Rule"
+  purpose: >
+    Formalizes the Two‑ID rule for atomic tasks.  The rule specifies that each atomic task must have
+    a machine‑friendly, globally unique identifier (atom_uid) and a stable, human‑readable key
+    (atom_key).  It details the recommended format for atom_key, including namespace, workflow slug,
+    version, phase, lane, sequence, optional variant and revision suffixes, and explains why this
+    separation improves stability and traceability.
+  atoms:
+    - atom_uid: 01DOC010ABCDEFGHIJKLMNOPQR
+      atom_key: DOC/two_id_rule/v1/doc/all/001
+      title: "Two‑ID rule guidance"
+      description: >
+        Encapsulates the guidance on constructing atom_uid and atom_key, giving examples of ULIDs,
+        UUIDv7 values and structured human keys.  It can be referenced by any process or workflow
+        that needs to understand the Two‑ID convention.
+      source_file: "ATOMIZED_PROCESSES/Two-ID Rule.md"

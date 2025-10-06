@@ -1,0 +1,28 @@
+workflow:
+  ns: GHCI
+  wf: WINDOWS_CI
+  wfv: v1
+  title: "Windows CI with Pester/PowerShell"
+  trigger:
+    on: [push, pull_request]
+  purpose: "Run PowerShell/Pester tests on Windows runners."
+  assumptions:
+    - "Pester tests located in tests/"
+  registry_generated: true
+
+atoms:
+  - atom_uid: 01JAX0A0WINCI001
+    atom_key: GHCI/WINDOWS_CI/v1/PH1/CHECKOUT/001
+    title: Checkout
+    deps: []
+    commands:
+      - gha: "actions/checkout@v4"
+
+  - atom_uid: 01JAX0A0WINCI002
+    atom_key: GHCI/WINDOWS_CI/v1/PH2/TEST/002
+    title: Run Pester
+    deps: [GHCI/WINDOWS_CI/v1/PH1/CHECKOUT/001]
+    commands:
+      - run: 'pwsh -NoProfile -Command "Install-Module Pester -Force -Scope CurrentUser; Invoke-Pester -Output Detailed"'
+    acceptance_criteria:
+      - "All tests pass"

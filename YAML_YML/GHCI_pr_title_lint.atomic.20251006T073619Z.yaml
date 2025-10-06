@@ -1,0 +1,31 @@
+workflow:
+  ns: GHCI
+  wf: PR_TITLE_LINT
+  wfv: v1
+  title: "PR title semantic lint gate"
+  trigger:
+    on: [pull_request]
+    conditions:
+      - "opened|edited|synchronize"
+  purpose: "Enforce Conventional Commits/semantic PR titles before merge."
+  invariants:
+    - "No merge if lint fails."
+    - "Read-only on repo content."
+  registry_generated: true
+
+atoms:
+  - atom_uid: 01JAX0A0PRTITLELINT001
+    atom_key: GHCI/PR_TITLE_LINT/v1/PH1/CHECKOUT/001
+    title: Checkout code
+    deps: []
+    commands:
+      - gha: "actions/checkout@v4"
+
+  - atom_uid: 01JAX0A0PRTITLELINT002
+    atom_key: GHCI/PR_TITLE_LINT/v1/PH2/LINT/002
+    title: Run semantic PR title lint
+    deps: [GHCI/PR_TITLE_LINT/v1/PH1/CHECKOUT/001]
+    commands:
+      - gha: "amannn/action-semantic-pull-request@v5"
+    acceptance_criteria:
+      - "status: success"

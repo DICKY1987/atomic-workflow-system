@@ -1,0 +1,166 @@
+workflow_uid: 01JBA2WFLOWBOOTSTRAP0000000000
+workflow_key: cli/bootstrap/v1
+title: "CLI Bootstrap — Deterministic Environment & Health Workflow"
+version: "1.0.0"
+namespace: "cli"
+description: >
+  Tool- and application-agnostic Two-ID atomic workflow that prepares a development
+  environment deterministically: detect host, discover tools, render configs, generate
+  session env scripts, verify repo and runtime, create a sample workflow, execute a
+  dry-run, summarize results, define & validate HTTP policy, append registry events,
+  and generate a human report.
+created: "2025-10-06T07:29:52.479660Z"
+policies:
+  id_format:
+    atom_uid: "ULID"
+    atom_key_regex: "^[a-z0-9-]+/[a-z0-9-]+/v[0-9]+/[a-z0-9-]+/[a-z0-9-]+/[0-9]{3}(-[a-z0-9-]+)?(-r[0-9]+)?$"
+  artifacts_dir: "artifacts/"
+  config_dir: "config/"
+  report_dir: "reports/"
+  session_scripts_dir: "scripts/"
+  deterministic_rules:
+    - "Sort keys before writing JSON/YAML outputs"
+    - "Use timeouts for all subprocess and network operations"
+    - "Use fixed retry/backoff policies for network operations"
+    - "All file globs and directory walks are sorted"
+    - "No permanent PATH mutations; only session scripts"
+validation:
+  require_unique_atom_uids: true
+  require_resolvable_deps: true
+  schemas_optional: true
+
+atoms:
+  - atom_uid: 01JBA2A0A0ENVENVENVENVENVEN
+    atom_key: cli/bootstrap/v1/init/all/001
+    title: "Detect host environment"
+    role: orchestrator
+    deps: []
+    inputs: []
+    outputs: ["artifacts/env_snapshot.json"]
+    status: active
+
+  - atom_uid: 01JBA2A0A2TOOLSFINDERAAABBB
+    atom_key: cli/bootstrap/v1/init/all/002
+    title: "Discover CLI tools"
+    role: orchestrator
+    deps: ["01JBA2A0A0ENVENVENVENVENVEN"]
+    inputs: ["config/tool_search_roots.yaml"]
+    outputs: ["artifacts/tools.discovered.json"]
+    status: active
+
+  - atom_uid: 01JBA2A0A3VERSIONSZZZCCC111
+    atom_key: cli/bootstrap/v1/init/all/003
+    title: "Probe tool versions"
+    role: orchestrator
+    deps: ["01JBA2A0A2TOOLSFINDERAAABBB"]
+    inputs: ["artifacts/tools.discovered.json", "config/version_probe_matrix.yaml"]
+    outputs: ["artifacts/tools.versions.json"]
+    status: active
+
+  - atom_uid: 01JBA2A0A4CFGEMITTERDDD222
+    atom_key: cli/bootstrap/v1/init/all/004
+    title: "Render tool configuration"
+    role: orchestrator
+    deps: ["01JBA2A0A3VERSIONSZZZCCC111"]
+    inputs: ["artifacts/tools.versions.json"]
+    outputs: ["config/tool_adapters.yaml"]
+    status: active
+
+  - atom_uid: 01JBA2A0A5ENVSCRIPTSUUU333
+    atom_key: cli/bootstrap/v1/init/all/005
+    title: "Generate session env scripts (no permanent mutation)"
+    role: orchestrator
+    deps: ["01JBA2A0A2TOOLSFINDERAAABBB"]
+    inputs: ["artifacts/tools.discovered.json"]
+    outputs: ["scripts/setup_tool_env.ps1","scripts/setup_tool_env.bat","scripts/setup_tool_env.sh"]
+    status: active
+
+  - atom_uid: 01JBA2A0A6GITHEALTHHHH444
+    atom_key: cli/bootstrap/v1/guard/all/006
+    title: "Verify Git repository health"
+    role: orchestrator
+    deps: ["01JBA2A0A0ENVENVENVENVENVEN"]
+    inputs: ["config/repo_policy.yaml"]
+    outputs: ["artifacts/git_health.json"]
+    status: active
+
+  - atom_uid: 01JBA2A0A7RUNTIMEPREREQS555
+    atom_key: cli/bootstrap/v1/guard/all/007
+    title: "Check runtime prerequisites"
+    role: orchestrator
+    deps: ["01JBA2A0A0ENVENVENVENVENVEN"]
+    inputs: ["config/runtime_requirements.yaml"]
+    outputs: ["artifacts/prereq_report.json"]
+    status: active
+
+  - atom_uid: 01JBA2A0A8LAYOUTCHECK666
+    atom_key: cli/bootstrap/v1/guard/all/008
+    title: "Validate project layout"
+    role: orchestrator
+    deps: ["01JBA2A0A0ENVENVENVENVENVEN"]
+    inputs: ["config/required_paths.yaml"]
+    outputs: ["artifacts/layout_report.json"]
+    status: active
+
+  - atom_uid: 01JBA2A0A9SAMPLEWFPPP777
+    atom_key: cli/bootstrap/v1/plan/all/009
+    title: "Create sample workflow (deterministic)"
+    role: planner_ai
+    deps: ["01JBA2A0A4CFGEMITTERDDD222"]
+    inputs: ["templates/quick_start.yaml"]
+    outputs: [".ai/workflows/quick-start.yaml","artifacts/quick_start.hash.txt"]
+    status: active
+
+  - atom_uid: 01JBA2A0B0DRYRUNWFQQQ888
+    atom_key: cli/bootstrap/v1/exec/all/010
+    title: "Execute workflow (dry-run)"
+    role: runner
+    deps: ["01JBA2A0A9SAMPLEWFPPP777"]
+    inputs: [".ai/workflows/quick-start.yaml","config/tool_adapters.yaml"]
+    outputs: ["artifacts/run_log.jsonl","artifacts/run_summary.json"]
+    status: active
+
+  - atom_uid: 01JBA2A0B1SUMMARYHEALTH999
+    atom_key: cli/bootstrap/v1/summary/all/011
+    title: "Summarize bootstrap health"
+    role: orchestrator
+    deps: ["01JBA2A0A6GITHEALTHHHH444","01JBA2A0A7RUNTIMEPREREQS555","01JBA2A0A8LAYOUTCHECK666","01JBA2A0B0DRYRUNWFQQQ888"]
+    inputs: ["artifacts/git_health.json","artifacts/prereq_report.json","artifacts/layout_report.json","artifacts/run_summary.json"]
+    outputs: ["artifacts/bootstrap_summary.json"]
+    status: active
+
+  - atom_uid: 01JBA2A0B2HTTPPOLICYDEF000
+    atom_key: cli/bootstrap/v1/net/all/012
+    title: "Define HTTP client policy"
+    role: orchestrator
+    deps: []
+    inputs: ["config/http_policy.template.json"]
+    outputs: ["config/http_policy.json"]
+    status: active
+
+  - atom_uid: 01JBA2A0B3HTTPPOLICYVAL111
+    atom_key: cli/bootstrap/v1/net/all/013
+    title: "Validate HTTP client policy"
+    role: tester
+    deps: ["01JBA2A0B2HTTPPOLICYDEF000"]
+    inputs: ["config/http_policy.json","config/http_endpoints.json"]
+    outputs: ["artifacts/http_policy_report.json"]
+    status: active
+
+  - atom_uid: 01JBA2A0B4REGISTRYAPPEND222
+    atom_key: cli/bootstrap/v1/registry/all/014
+    title: "Emit registry events"
+    role: orchestrator
+    deps: ["01JBA2A0B1SUMMARYHEALTH999"]
+    inputs: ["artifacts/bootstrap_summary.json"]
+    outputs: ["registry/atoms.registry.jsonl"]
+    status: active
+
+  - atom_uid: 01JBA2A0B5HUMANREPORT333
+    atom_key: cli/bootstrap/v1/report/all/015
+    title: "Generate human-readable bootstrap report"
+    role: orchestrator
+    deps: ["01JBA2A0B1SUMMARYHEALTH999"]
+    inputs: ["artifacts/bootstrap_summary.json"]
+    outputs: ["reports/bootstrap_report.md"]
+    status: active

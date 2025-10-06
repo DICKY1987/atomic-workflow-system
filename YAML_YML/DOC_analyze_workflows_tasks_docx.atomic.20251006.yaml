@@ -1,0 +1,18 @@
+workflow:
+  ns: DOC
+  wf: analyze_workflows_tasks_docx
+  wfv: v1
+  title: "Analyze workflows tasks (docx)"
+  purpose: >
+    Provides documentation outlining the various tasks involved in analyzing workflows. This document
+    exists in DOCX format and contains task decomposition notes used to guide atomic workflow creation
+    and analysis.
+  atoms:
+    - atom_uid: 01DOC001ABCDEFGHIJKLMNOPQR
+      atom_key: DOC/analyze_workflows_tasks_docx/v1/doc/all/001
+      title: "Analyze workflows tasks documentation"
+      description: >
+        This atom refers to the DOCX document describing workflow analysis tasks. It serves as a
+        placeholder for the contents of the file and can be expanded into smaller atoms once the
+        tasks are extracted and enumerated.
+      source_file: "ATOMIZED_PROCESSES/Analyze workflows tasks.docx"

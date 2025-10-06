@@ -1,0 +1,21 @@
+workflow:
+  ns: DOC
+  wf: atomic_task_decomposition_separated_workflows
+  wfv: v1
+  title: "Atomic Task Decomposition – Separated Workflows"
+  purpose: >
+    Decomposes each workflow in the repository into its constituent atomic tasks.  The document
+    enumerates the tasks for distinct orchestrators such as the Multi‑CLI Orchestrator, Free‑Tier
+    Orchestrator, Routing Engine, predetermined Python editing workflow, workflow enhancements,
+    simplified workflow mode, and API execution workflows.  Each atom is presented with a
+    YAML‑friendly identifier and descriptive name.
+  atoms:
+    - atom_uid: 01DOC002ABCDEFGHIJKLMNOPQR
+      atom_key: DOC/atomic_task_decomposition_separated_workflows/v1/doc/all/001
+      title: "Separated workflows task decomposition"
+      description: >
+        This atom captures the full text of the document that lists atomic tasks grouped by
+        orchestrator and phase.  It serves as a container for the decomposed tasks so they can
+        later be converted into individual atoms.  The content includes tasks prefixed with
+        mo_atom_*, ft_atom_*, rt_atom_*, pw_atom_*, wh_atom_*, sw_atom_* and ap_atom_*.
+      source_file: "ATOMIZED_PROCESSES/Atomic Task Decomposition – Separated Workflows.md"

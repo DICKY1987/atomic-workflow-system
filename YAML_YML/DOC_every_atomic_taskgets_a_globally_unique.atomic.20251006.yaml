@@ -1,0 +1,20 @@
+workflow:
+  ns: DOC
+  wf: every_atomic_taskgets_a_globally_unique
+  wfv: v1
+  title: "Every atomic task gets a globally unique ID"
+  purpose: >
+    Defines the Two‑ID rule that underpins the atomic workflow system.  Each atomic task is assigned a
+    globally unique, permanent identifier (atom_uid) for machine referencing and a human‑readable key
+    (atom_key) that is stable within its workflow.  The document explains the benefits of separating
+    machine and human identifiers and provides examples.
+  atoms:
+    - atom_uid: 01DOC007ABCDEFGHIJKLMNOPQR
+      atom_key: DOC/every_atomic_taskgets_a_globally_unique/v1/doc/all/001
+      title: "Two‑ID rule documentation"
+      description: >
+        Encapsulates the description of the Two‑ID rule.  It discusses the formats for atom_uid (e.g., ULID
+        or UUIDv7) and atom_key (namespace/workflow/version/phase/lane/sequence) and offers guidance on
+        using machine IDs for systems while keeping human keys stable.  This atom can be referenced
+        whenever the Two‑ID principle needs to be explained.
+      source_file: "ATOMIZED_PROCESSES/Every atomic taskgets a globally unique.md"

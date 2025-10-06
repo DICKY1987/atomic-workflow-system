@@ -1,0 +1,17 @@
+name: scheduled-cleanup
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run orphan cleanup (dry-run)
+        run: |
+          python3 scripts/cleanup_orphans.py --dry-run --branch-days 7 --lock-hours 1
+

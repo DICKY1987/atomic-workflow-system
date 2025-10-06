@@ -1,0 +1,17 @@
+workflow:
+  ns: DOC
+  wf: decompose_file_tasks_1_docx
+  wfv: v1
+  title: "Decompose file tasks (1) (docx)"
+  purpose: >
+    Provides task decomposition notes for a specific file or set of files.  The contents of this
+    DOCX document outline how to break down file manipulation tasks into atomic operations for
+    inclusion in deterministic workflows.
+  atoms:
+    - atom_uid: 01DOC005ABCDEFGHIJKLMNOPQR
+      atom_key: DOC/decompose_file_tasks_1_docx/v1/doc/all/001
+      title: "Decompose file tasks (1) documentation"
+      description: >
+        This atom refers to the DOCX file that lists tasks for decomposing file operations.  It acts
+        as a placeholder for the tasks until they are extracted and converted into individual atoms.
+      source_file: "ATOMIZED_PROCESSES/Decompose file tasks (1).docx"
