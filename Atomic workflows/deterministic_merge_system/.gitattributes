@@ -1,0 +1,16 @@
+* text=auto eol=lf
+
+CHANGELOG.md merge=union
+
+*.png binary
+*.jpg binary
+
+package-lock.json merge=theirs
+poetry.lock     merge=theirs
+
+*.json merge=json-struct
+*.yml  merge=yaml-struct
+*.yaml merge=yaml-struct
+
+Dockerfile merge=manual
+requirements.txt merge=theirs
