@@ -54,7 +54,7 @@ task
         # Convert using md2atom
         output_file = self.atoms_dir / 'test.yaml'
         result = subprocess.run([
-            'python3', str(tools_path / 'md2atom.py'),
+            sys.executable, str(tools_path / 'md2atom.py'),
             str(md_file),
             '--output', str(output_file),
             '--namespace', 'test',
@@ -102,7 +102,7 @@ Set-Content "output.txt" -Value "Done"
         # Convert using ps2atom
         output_file = self.atoms_dir / 'test_ps.yaml'
         result = subprocess.run([
-            'python3', str(tools_path / 'ps2atom.py'),
+            sys.executable, str(tools_path / 'ps2atom.py'),
             str(ps_file),
             '--output', str(output_file),
             '--namespace', 'test',
@@ -150,7 +150,7 @@ with open('output.json', 'w') as f:
         # Convert using py2atom
         output_file = self.atoms_dir / 'test_py.yaml'
         result = subprocess.run([
-            'python3', str(tools_path / 'py2atom.py'),
+            sys.executable, str(tools_path / 'py2atom.py'),
             str(py_file),
             '--output', str(output_file),
             '--namespace', 'test',
