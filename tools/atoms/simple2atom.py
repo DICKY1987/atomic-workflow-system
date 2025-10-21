@@ -17,15 +17,15 @@ Usage:
     python simple2atom.py input.json --namespace cli --workflow dev-setup --version v1 \
                           --phase init --lane all --sequence 1
 """
-import sys
-import json
-from pathlib import Path
-from typing import Dict, Optional
-import yaml
-import structlog
 import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Optional
 
-from id_utils import generate_ulid, build_atom_key, validate_ulid
+import structlog
+import yaml
+from id_utils import build_atom_key, generate_ulid, validate_ulid
 
 log = structlog.get_logger()
 
@@ -40,10 +40,10 @@ def convert_simple_to_atom(
     sequence: int,
     variant: Optional[str] = None,
     revision: Optional[int] = None
-) -> Dict:
+) -> dict:
     """
     Convert a Simple JSON file to an Atom definition.
-    
+
     Args:
         json_path: Path to JSON file
         namespace: Namespace for atom_key
@@ -54,18 +54,18 @@ def convert_simple_to_atom(
         sequence: Sequence number for atom_key
         variant: Optional variant
         revision: Optional revision number
-        
+
     Returns:
         Atom dictionary
     """
     log.info("simple2atom.converting", file=str(json_path))
-    
-    with open(json_path, 'r', encoding='utf-8') as f:
+
+    with open(json_path, encoding='utf-8') as f:
         simple_data = json.load(f)
-    
+
     if not isinstance(simple_data, dict):
         raise ValueError(f"JSON file must contain an object: {json_path}")
-    
+
     # Build atom with required fields
     atom = {
         'atom_uid': generate_ulid(),
@@ -73,23 +73,23 @@ def convert_simple_to_atom(
         'title': simple_data.get('title', 'Untitled'),
         'role': simple_data.get('role', 'task'),
     }
-    
+
     # Add optional fields if present
     if 'description' in simple_data and simple_data['description']:
         atom['description'] = simple_data['description']
-    
+
     if 'inputs' in simple_data and simple_data['inputs']:
         if isinstance(simple_data['inputs'], list):
             atom['inputs'] = simple_data['inputs']
         else:
             log.warning("simple2atom.invalid_inputs", file=str(json_path))
-    
+
     if 'outputs' in simple_data and simple_data['outputs']:
         if isinstance(simple_data['outputs'], list):
             atom['outputs'] = simple_data['outputs']
         else:
             log.warning("simple2atom.invalid_outputs", file=str(json_path))
-    
+
     if 'deps' in simple_data and simple_data['deps']:
         if isinstance(simple_data['deps'], list):
             valid_deps = []
@@ -102,18 +102,18 @@ def convert_simple_to_atom(
                 atom['deps'] = valid_deps
         else:
             log.warning("simple2atom.invalid_deps", file=str(json_path))
-    
+
     # Copy any additional fields (deterministic mapping)
     known_fields = {'title', 'description', 'role', 'inputs', 'outputs', 'deps'}
     for key, value in simple_data.items():
         if key not in known_fields and value is not None:
             atom[key] = value
-    
+
     log.info("simple2atom.converted",
              file=str(json_path),
              atom_uid=atom['atom_uid'],
              atom_key=atom['atom_key'])
-    
+
     return atom
 
 
@@ -126,7 +126,7 @@ def main():
             structlog.processors.JSONRenderer()
         ]
     )
-    
+
     parser = argparse.ArgumentParser(description='Convert Simple JSON to Atom format')
     parser.add_argument('input', help='Input JSON file')
     parser.add_argument('--output', '-o', help='Output YAML file (default: stdout)')
@@ -138,9 +138,9 @@ def main():
     parser.add_argument('--sequence', type=int, required=True, help='Sequence number')
     parser.add_argument('--variant', help='Optional variant (e.g., win, linux)')
     parser.add_argument('--revision', type=int, help='Optional revision number')
-    
+
     args = parser.parse_args()
-    
+
     try:
         atom = convert_simple_to_atom(
             Path(args.input),
@@ -153,16 +153,16 @@ def main():
             args.variant,
             args.revision
         )
-        
+
         yaml_output = yaml.dump(atom, sort_keys=False, allow_unicode=True)
-        
+
         if args.output:
             with open(args.output, 'w', encoding='utf-8') as f:
                 f.write(yaml_output)
             log.info("simple2atom.written", output=args.output)
         else:
             print(yaml_output)
-            
+
     except Exception as e:
         log.error("simple2atom.failed", error=str(e))
         sys.exit(1)

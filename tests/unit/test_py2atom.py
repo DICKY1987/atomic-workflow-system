@@ -1,17 +1,18 @@
 """Unit tests for py2atom converter."""
-import pytest
-from pathlib import Path
 import sys
 import tempfile
+from pathlib import Path
+
+import pytest
 
 # Add tools directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'tools' / 'atoms'))
 
 from py2atom import (
+    convert_py_to_atom,
     extract_docstring,
     extract_pragmas,
     scan_file_patterns,
-    convert_py_to_atom
 )
 
 
@@ -27,9 +28,9 @@ spanning multiple lines.
 def main():
     pass
 '''
-    
+
     result = extract_docstring(py_content)
-    
+
     assert result is not None
     assert result['title'] == 'Short title.'
     assert 'longer description' in result['description']
@@ -46,9 +47,9 @@ def test_extract_pragmas():
 def main():
     pass
 """
-    
+
     pragmas = extract_pragmas(py_content)
-    
+
     assert pragmas['role'] == 'processor'
     assert 'deps' in pragmas
     assert len(pragmas['deps']) == 2
@@ -73,9 +74,9 @@ with open('output.json', 'w') as f:
 Path('data.txt').read_text()
 Path('result.txt').write_text('Done')
 """
-    
+
     patterns = scan_file_patterns(py_content)
-    
+
     assert 'input.json' in patterns['inputs']
     assert 'data.txt' in patterns['inputs']
     assert 'output.json' in patterns['outputs']
@@ -100,7 +101,7 @@ import json
 def main():
     with open('data.json', 'r') as f:
         data = json.load(f)
-    
+
     with open('result.json', 'w') as f:
         json.dump(data, f)
 
@@ -108,7 +109,7 @@ if __name__ == '__main__':
     main()
 ''')
         temp_path = Path(f.name)
-    
+
     try:
         atom = convert_py_to_atom(
             temp_path,
@@ -119,7 +120,7 @@ if __name__ == '__main__':
             'all',
             3
         )
-        
+
         assert 'atom_uid' in atom
         assert 'atom_key' in atom
         assert atom['atom_key'] == 'cli/pipeline/v1/exec/all/003'

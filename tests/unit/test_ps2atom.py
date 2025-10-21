@@ -1,17 +1,18 @@
 """Unit tests for ps2atom converter."""
-import pytest
-from pathlib import Path
 import sys
 import tempfile
+from pathlib import Path
+
+import pytest
 
 # Add tools directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'tools' / 'atoms'))
 
 from ps2atom import (
+    convert_ps_to_atom,
     extract_comment_block_help,
     extract_pragmas,
     scan_file_patterns,
-    convert_ps_to_atom
 )
 
 
@@ -28,9 +29,9 @@ of the script functionality.
 
 Write-Host "Test"
 """
-    
+
     help_data = extract_comment_block_help(ps_content)
-    
+
     assert 'synopsis' in help_data
     assert 'Test script synopsis' in help_data['synopsis']
     assert 'description' in help_data
@@ -47,9 +48,9 @@ def test_extract_pragmas():
 
 Write-Host "Test"
 """
-    
+
     pragmas = extract_pragmas(ps_content)
-    
+
     assert pragmas['role'] == 'orchestrator'
     assert 'deps' in pragmas
     assert len(pragmas['deps']) == 2
@@ -68,9 +69,9 @@ $data = Import-Csv "data.csv"
 Set-Content -Path "output.txt" -Value "Result"
 Export-Csv -Path "results.csv" -InputObject $data
 """
-    
+
     patterns = scan_file_patterns(ps_content)
-    
+
     assert 'config.json' in patterns['inputs']
     assert 'data.csv' in patterns['inputs']
     assert 'output.txt' in patterns['outputs']
@@ -97,7 +98,7 @@ $reqs = Get-Content "requirements.json"
 Set-Content "validation.log" -Value "OK"
 """)
         temp_path = Path(f.name)
-    
+
     try:
         atom = convert_ps_to_atom(
             temp_path,
@@ -108,7 +109,7 @@ Set-Content "validation.log" -Value "OK"
             'all',
             2
         )
-        
+
         assert 'atom_uid' in atom
         assert 'atom_key' in atom
         assert atom['atom_key'] == 'cli/setup/v1/init/all/002'

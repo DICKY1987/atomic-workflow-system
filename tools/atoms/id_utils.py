@@ -3,8 +3,8 @@
 Utility functions for generating and validating identifiers (ULID, atom_key).
 """
 import re
-from ulid import ULID
 
+from ulid import ULID
 
 # Regex patterns from the specification
 ATOM_KEY_REGEX = r'^[a-z0-9-]+/[a-z0-9-]+/v[0-9]+/[a-z0-9-]+/[a-z0-9-]+/[0-9]{3}(-[a-z0-9-]+)?(-r[0-9]+)?$'
@@ -14,7 +14,7 @@ ULID_REGEX = r'^[0-9A-HJKMNP-TV-Z]{26}$'
 def generate_ulid() -> str:
     """
     Generate a new ULID (Universally Unique Lexicographically Sortable Identifier).
-    
+
     Returns:
         str: A 26-character ULID string
     """
@@ -24,10 +24,10 @@ def generate_ulid() -> str:
 def validate_ulid(uid: str) -> bool:
     """
     Validate that a string matches the ULID format.
-    
+
     Args:
         uid: String to validate
-        
+
     Returns:
         bool: True if valid ULID format, False otherwise
     """
@@ -37,10 +37,10 @@ def validate_ulid(uid: str) -> bool:
 def validate_atom_key(key: str) -> bool:
     """
     Validate that a string matches the atom_key format.
-    
+
     Args:
         key: String to validate
-        
+
     Returns:
         bool: True if valid atom_key format, False otherwise
     """
@@ -59,7 +59,7 @@ def build_atom_key(
 ) -> str:
     """
     Construct atom_key from workflow context.
-    
+
     Args:
         namespace: Namespace (e.g., 'cli', 'hp')
         workflow: Workflow slug (e.g., 'dev-setup')
@@ -69,17 +69,17 @@ def build_atom_key(
         sequence: Sequence number (e.g., 3)
         variant: Optional variant (e.g., 'win', 'linux')
         revision: Optional revision number
-        
+
     Returns:
         str: Constructed atom_key
     """
     seq_padded = f"{sequence:03d}"
     atom_key = f"{namespace}/{workflow}/{version}/{phase}/{lane}/{seq_padded}"
-    
+
     if variant:
         atom_key += f"-{variant}"
-    
+
     if revision is not None:
         atom_key += f"-r{revision}"
-    
+
     return atom_key

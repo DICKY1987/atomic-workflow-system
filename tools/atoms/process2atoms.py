@@ -20,13 +20,11 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import datetime as dt
-import io
 import json
 import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
 
 import structlog
 import yaml
@@ -36,9 +34,8 @@ TOOLS_DIR = Path(__file__).parent
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from id_utils import build_atom_key, generate_ulid, validate_atom_key, validate_ulid
 from atom_validator import validate_atom as validate_atom_file
-
+from id_utils import build_atom_key, generate_ulid, validate_atom_key, validate_ulid
 
 log = structlog.get_logger()
 
@@ -81,7 +78,7 @@ class AtomSpec:
         return titleize(self.raw_title)
 
 
-def map_tag_to_lane(tag: Optional[str]) -> str:
+def map_tag_to_lane(tag: str | None) -> str:
     if not tag:
         return "all"
     tag_norm = tag.strip().lower()
@@ -92,7 +89,7 @@ def map_tag_to_lane(tag: Optional[str]) -> str:
     return "all"
 
 
-def parse_process_doc(doc_path: Path) -> Tuple[str, List[AtomSpec]]:
+def parse_process_doc(doc_path: Path) -> tuple[str, list[AtomSpec]]:
     """
     Parse the process Markdown and return workflow title and list of AtomSpec.
     """
@@ -103,7 +100,7 @@ def parse_process_doc(doc_path: Path) -> Tuple[str, List[AtomSpec]]:
     current_phase_slug = None
     current_lane = "all"
     in_code = False
-    atoms: List[AtomSpec] = []
+    atoms: list[AtomSpec] = []
 
     # Workflow title from first H1 if present
     for ln in lines:
@@ -166,7 +163,7 @@ def parse_process_doc(doc_path: Path) -> Tuple[str, List[AtomSpec]]:
         i += 1
 
     # Dedup by (phase,lane,seq) keeping last occurrence
-    dedup: Dict[Tuple[str, str, int], AtomSpec] = {}
+    dedup: dict[tuple[str, str, int], AtomSpec] = {}
     for a in atoms:
         dedup[(a.phase_slug, a.lane, a.sequence)] = a
     atoms_dedup = list(dedup.values())
@@ -179,11 +176,11 @@ def ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
 
-def read_registry_map(registry_path: Path) -> Dict[str, str]:
+def read_registry_map(registry_path: Path) -> dict[str, str]:
     """Return map of atom_key -> last known atom_uid from JSONL registry."""
     if not registry_path.exists():
         return {}
-    mp: Dict[str, str] = {}
+    mp: dict[str, str] = {}
     with registry_path.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -200,7 +197,7 @@ def read_registry_map(registry_path: Path) -> Dict[str, str]:
     return mp
 
 
-def append_registry_entries(registry_path: Path, entries: List[dict]) -> None:
+def append_registry_entries(registry_path: Path, entries: list[dict]) -> None:
     """Append entries atomically (best-effort lock file)."""
     # Simple lock file on Windows/Linux
     lock_path = registry_path.with_suffix(registry_path.suffix + ".lock")
@@ -230,7 +227,7 @@ def append_registry_entries(registry_path: Path, entries: List[dict]) -> None:
 
 
 def generate_yaml_and_registry(
-    atoms: List[AtomSpec],
+    atoms: list[AtomSpec],
     *,
     namespace: str,
     workflow: str,
@@ -238,11 +235,11 @@ def generate_yaml_and_registry(
     atoms_dir: Path,
     registry_path: Path,
     dry_run: bool = False,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     registry_map = read_registry_map(registry_path)
     created, updated, skipped = 0, 0, 0
-    out_files: List[str] = []
-    reg_entries: List[dict] = []
+    out_files: list[str] = []
+    reg_entries: list[dict] = []
 
     now = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc).isoformat()
 
@@ -325,7 +322,7 @@ def infer_workflow_slug(title: str) -> str:
     return slugify(title)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     configure_logging()
     p = argparse.ArgumentParser(description="Convert process doc to YAML atoms and update registry")
     src = p.add_mutually_exclusive_group(required=True)
@@ -341,7 +338,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     args = p.parse_args(argv)
 
-    targets: List[Path] = []
+    targets: list[Path] = []
     if args.doc:
         doc_path = Path(args.doc)
         if not doc_path.exists():
@@ -353,7 +350,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         if not d.exists() or not d.is_dir():
             print(f"Docs dir not found: {d}", file=sys.stderr)
             return 2
-        targets = [p for p in d.glob("*.md")]
+        targets = list(d.glob("*.md"))
         if not targets:
             print("No .md files found in docs-dir.", file=sys.stderr)
             return 3

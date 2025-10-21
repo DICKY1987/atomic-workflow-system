@@ -1,11 +1,12 @@
 """System tests for end-to-end workflow validation."""
-import pytest
-from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tempfile
-import shutil
+from pathlib import Path
+
+import pytest
 import yaml
-import subprocess
 
 # Add tools directory to path
 tools_path = Path(__file__).parent.parent.parent / 'tools' / 'atoms'
@@ -16,18 +17,18 @@ from atom_validator import validate_atom
 
 class TestEndToEndWorkflow:
     """Test complete workflow from conversion to validation."""
-    
+
     def setup_method(self):
         """Set up temporary directory for each test."""
         self.temp_dir = Path(tempfile.mkdtemp())
         self.atoms_dir = self.temp_dir / 'atoms'
         self.atoms_dir.mkdir()
-    
+
     def teardown_method(self):
         """Clean up temporary directory."""
         if self.temp_dir.exists():
             shutil.rmtree(self.temp_dir)
-    
+
     def test_md2atom_to_validation(self):
         """Test Markdown conversion and validation."""
         # Create test markdown file
@@ -50,7 +51,7 @@ This is a test task.
 
 task
 """)
-        
+
         # Convert using md2atom
         output_file = self.atoms_dir / 'test.yaml'
         result = subprocess.run([
@@ -64,23 +65,23 @@ task
             '--lane', 'all',
             '--sequence', '1'
         ], capture_output=True, text=True)
-        
+
         assert result.returncode == 0, f"Conversion failed: {result.stderr}"
         assert output_file.exists()
-        
+
         # Validate the atom
         errors = validate_atom(output_file)
         assert len(errors) == 0, f"Validation errors: {errors}"
-        
+
         # Check content
         with open(output_file) as f:
             atom = yaml.safe_load(f)
-        
+
         assert atom['title'] == 'Test Task'
         assert atom['role'] == 'task'
         assert 'atom_uid' in atom
         assert 'atom_key' in atom
-    
+
     def test_ps2atom_to_validation(self):
         """Test PowerShell conversion and validation."""
         # Create test PowerShell file
@@ -98,7 +99,7 @@ Validates system requirements
 $data = Get-Content "input.json"
 Set-Content "output.txt" -Value "Done"
 """)
-        
+
         # Convert using ps2atom
         output_file = self.atoms_dir / 'test_ps.yaml'
         result = subprocess.run([
@@ -112,21 +113,21 @@ Set-Content "output.txt" -Value "Done"
             '--lane', 'all',
             '--sequence', '2'
         ], capture_output=True, text=True)
-        
+
         assert result.returncode == 0, f"Conversion failed: {result.stderr}"
         assert output_file.exists()
-        
+
         # Validate the atom
         errors = validate_atom(output_file)
         assert len(errors) == 0, f"Validation errors: {errors}"
-        
+
         # Check content
         with open(output_file) as f:
             atom = yaml.safe_load(f)
-        
+
         assert 'PowerShell' in atom['title'] or 'Test' in atom['title']
         assert atom['role'] == 'validator'
-    
+
     def test_py2atom_to_validation(self):
         """Test Python conversion and validation."""
         # Create test Python file
@@ -146,7 +147,7 @@ with open('input.json', 'r') as f:
 with open('output.json', 'w') as f:
     json.dump(data, f)
 ''')
-        
+
         # Convert using py2atom
         output_file = self.atoms_dir / 'test_py.yaml'
         result = subprocess.run([
@@ -160,21 +161,21 @@ with open('output.json', 'w') as f:
             '--lane', 'all',
             '--sequence', '3'
         ], capture_output=True, text=True)
-        
+
         assert result.returncode == 0, f"Conversion failed: {result.stderr}"
         assert output_file.exists()
-        
+
         # Validate the atom
         errors = validate_atom(output_file)
         assert len(errors) == 0, f"Validation errors: {errors}"
-        
+
         # Check content
         with open(output_file) as f:
             atom = yaml.safe_load(f)
-        
+
         assert 'Test' in atom['title']
         assert atom['role'] == 'processor'
-    
+
     def test_batch_validation(self):
         """Test batch validation of multiple atoms."""
         # Create multiple test atoms
@@ -185,11 +186,11 @@ atom_key: test/demo/v1/exec/all/{str(i+1).zfill(3)}
 title: Test Atom {i}
 role: task
 """)
-        
+
         # Validate all atoms
         from atom_validator import validate_paths
         errors = validate_paths([str(self.atoms_dir)])
-        
+
         assert len(errors) == 0, f"Validation errors: {errors}"
 
 

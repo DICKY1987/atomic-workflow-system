@@ -1,11 +1,11 @@
 """Tests for process2atoms parser and generation helpers."""
-from pathlib import Path
 import sys
+from pathlib import Path
 
 # Add tools dir to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'tools' / 'atoms'))
 
-from process2atoms import parse_process_doc, map_tag_to_lane, slugify
+from process2atoms import map_tag_to_lane, parse_process_doc
 
 
 def test_map_tag_to_lane():
