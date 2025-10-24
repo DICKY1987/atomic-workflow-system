@@ -1,9 +1,10 @@
 """Unit tests for simple2atom converter."""
-import pytest
-from pathlib import Path
+import json
 import sys
 import tempfile
-import json
+from pathlib import Path
+
+import pytest
 
 # Add tools directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'tools' / 'atoms'))
@@ -23,7 +24,7 @@ def test_convert_simple_to_atom_basic():
             "outputs": ["output.txt"]
         }, f)
         temp_path = Path(f.name)
-    
+
     try:
         atom = convert_simple_to_atom(
             temp_path,
@@ -34,7 +35,7 @@ def test_convert_simple_to_atom_basic():
             'all',
             1
         )
-        
+
         assert 'atom_uid' in atom
         assert 'atom_key' in atom
         assert atom['atom_key'] == 'cli/test/v1/exec/all/001'
@@ -57,7 +58,7 @@ def test_convert_simple_to_atom_with_deps():
             "deps": ["01K6W1BSSCAZGCG5M81WJHRSXK", "01K6W1CF5DSTQSR3ZYZ2XD1X45"]
         }, f)
         temp_path = Path(f.name)
-    
+
     try:
         atom = convert_simple_to_atom(
             temp_path,
@@ -68,7 +69,7 @@ def test_convert_simple_to_atom_with_deps():
             'all',
             2
         )
-        
+
         assert 'deps' in atom
         assert len(atom['deps']) == 2
         assert '01K6W1BSSCAZGCG5M81WJHRSXK' in atom['deps']
@@ -84,7 +85,7 @@ def test_convert_simple_to_atom_minimal():
             "title": "Minimal Task"
         }, f)
         temp_path = Path(f.name)
-    
+
     try:
         atom = convert_simple_to_atom(
             temp_path,
@@ -95,7 +96,7 @@ def test_convert_simple_to_atom_minimal():
             'all',
             3
         )
-        
+
         assert atom['title'] == 'Minimal Task'
         assert atom['role'] == 'task'  # Default role
         assert 'atom_uid' in atom

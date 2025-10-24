@@ -1,13 +1,18 @@
 """Unit tests for md2atom converter."""
-import pytest
-from pathlib import Path
 import sys
 import tempfile
+from pathlib import Path
+
+import pytest
 
 # Add tools directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'tools' / 'atoms'))
 
-from md2atom import parse_markdown_sections, extract_list_items, convert_markdown_to_atom
+from md2atom import (
+    convert_markdown_to_atom,
+    extract_list_items,
+    parse_markdown_sections,
+)
 
 
 def test_parse_markdown_sections():
@@ -29,9 +34,9 @@ This is a description section.
 
 - output.txt
 """
-    
+
     sections = parse_markdown_sections(md_content)
-    
+
     assert 'title' in sections
     assert sections['title'] == 'Test Title'
     assert 'description' in sections
@@ -49,7 +54,7 @@ def test_extract_list_items():
 1. numbered1
 2. numbered2
 """
-    
+
     items = extract_list_items(text)
     assert len(items) == 6
     assert 'item1' in items
@@ -80,7 +85,7 @@ Setup the development environment.
 orchestrator
 """)
         temp_path = Path(f.name)
-    
+
     try:
         atom = convert_markdown_to_atom(
             temp_path,
@@ -91,7 +96,7 @@ orchestrator
             'all',
             1
         )
-        
+
         assert 'atom_uid' in atom
         assert 'atom_key' in atom
         assert atom['atom_key'] == 'cli/dev-setup/v1/init/all/001'

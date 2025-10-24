@@ -11,6 +11,7 @@ This tooling suite provides:
   - `ps2atom.py`: PowerShell scripts to Atom
   - `py2atom.py`: Python scripts to Atom
   - `simple2atom.py`: Simple JSON to Atom
+  - `process2atoms.py`: Atomized process doc → many Atom YAMLs + registry update (non-interactive)
 
 - **Supporting Tools**:
   - `atom_validator.py`: Validates atom schema compliance
@@ -75,6 +76,34 @@ python3 tools/atoms/simple2atom.py task.json \
   --phase exec \
   --lane all \
   --sequence 1
+```
+
+#### Process Doc to Many Atoms + Registry
+```bash
+# Dry run: parse and report without writing files
+python3 tools/atoms/process2atoms.py \
+  --doc ATOMIZED_PROCESSES/Tool-Agnostic\ Multi-Agent\ Code\ Modification\ Pipeline.md \
+  --namespace cli \
+  --version v1 \
+  --atoms-dir atoms \
+  --registry atoms.registry.jsonl \
+  --dry-run
+
+# Execute: generate YAMLs, validate, append to registry (non-interactive)
+python3 tools/atoms/process2atoms.py \
+  --doc ATOMIZED_PROCESSES/Tool-Agnostic\ Multi-Agent\ Code\ Modification\ Pipeline.md \
+  --namespace cli \
+  --version v1 \
+  --atoms-dir atoms \
+  --registry atoms.registry.jsonl
+
+# Batch-convert all .md in a folder
+python3 tools/atoms/process2atoms.py \
+  --docs-dir ATOMIZED_PROCESSES/ \
+  --namespace cli \
+  --version v1 \
+  --atoms-dir atoms \
+  --registry atoms.registry.jsonl
 ```
 
 ### Validating Atoms
